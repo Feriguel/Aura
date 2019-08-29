@@ -1,0 +1,23 @@
+﻿{
+	"configurations": [
+		{
+			"buildCommandArgs": "-v",
+			"buildRoot": "${projectDir}/__cmake_build__/${name}/${configurationType}",
+			"cmakeCommandArgs": "",
+			"configurationType": "Debug",
+			"ctestCommandArgs": "",
+			"generator": "Ninja",
+			"inheritEnvironments": [ "msvc_x64_x64" ],
+			"installRoot": "${projectDir}/__cmake_install__/${name}/${configurationType}",
+			"name": "Aura",
+			"variables": [
+				{
+					"name": "CMAKE_CXX_FLAGS",
+					"value": "/DWIN32 /D_WINDOWS /W4 /WX /GR /EHsc",
+					"type": "STRING"
+				}
+			],
+			"intelliSenseMode": "windows-msvc-x64"
+		}
+	]
+}

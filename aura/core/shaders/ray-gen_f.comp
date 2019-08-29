@@ -1,0 +1,51 @@
+#version 460
+
+// Workspace settings.
+layout ( local_size_x = 8, local_size_y = 8, local_size_z = 1 ) in;
+//							0.123456789012345
+#define PRECISION			0.0000001
+#define PI					3.1415927
+// Ray launcher.
+layout(std140, set = 0, binding = 0) uniform RayLauncher {
+	vec4 origin;
+	vec4 top_left_corner;
+	vec4 horizontal;
+	vec4 vertical;
+	vec4 u;
+	vec4 v;
+	vec4 w;
+	float lens_radius;
+};
+// Output buffer.
+struct Ray
+{
+	vec4 origin;
+	vec4 direction;
+	vec4 albedo;
+	uint bounces;
+	uint width_index;
+	uint height_index;
+};
+layout(std140, set = 0, binding = 1) buffer Rays {
+	Ray rays [];
+};
+layout(push_constant) uniform Randomizer {
+	float[3] random;
+};
+// Generates a ray for each workspace position. The work space should be the
+// output image dimensions.
+void main ()
+{
+	const uint s = gl_GlobalInvocationID.s;
+	const uint t = gl_GlobalInvocationID.t;
+	const uint pos = s * t + s;
+	const vec4 offset = u * lens_radius * random[0] + v * lens_radius * random[1];
+	rays[pos] = Ray(
+		// Origin.
+		origin + offset,
+		// Direction.
+		normalize(top_left_corner - origin - offset + s * horizontal + t * vertical),
+		// Albedo, bounces, width and height.
+		vec4(1.0f), 0U, s, t
+	);
+}

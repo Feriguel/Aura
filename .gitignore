@@ -1,0 +1,26 @@
+# ============================================================================ #
+# File: .gitignore
+#
+# Description: This git ignore is set to ignore all files and admit the ones
+# needed by the project.
+#
+# Author: Miguel Ângelo Crespo Ferreira
+# ============================================================================ #
+
+# Ignore all files.
+*.*
+# Ignore build and install folders.
+__cmake_build__
+__cmake_install__
+
+# Permissions.
+!.gitignore
+!CMakeLists.txt
+!CMakeSettings.json
+!LICENSE
+!README.md
+!*.comp
+!*.cpp
+!*.hpp
+!*.hpp.in
+!*/models/*.obj
