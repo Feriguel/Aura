@@ -14,19 +14,13 @@ add_custom_target(Shaders
 	WORKING_DIRECTORY
 		"${CMAKE_CURRENT_SOURCE_DIR}"
 	COMMAND
-		glslangValidator.exe -V ray-gen_f.comp -o ray-gen_f.spv
+		glslangValidator.exe -V ray-gen.comp -o ray-gen.spv
 	COMMAND
 		${CMAKE_COMMAND} -E copy
-			${CMAKE_CURRENT_SOURCE_DIR}/ray-gen_f.spv
-			${CMAKE_CURRENT_BINARY_DIR}/ray-gen_f.spv
-	COMMAND
-		glslangValidator.exe -V ray-gen_test.comp -o ray-gen_test.spv
-	COMMAND
-		${CMAKE_COMMAND} -E copy
-			${CMAKE_CURRENT_SOURCE_DIR}/ray-gen_test.spv
-			${CMAKE_CURRENT_BINARY_DIR}/ray-gen_test.spv
+			${CMAKE_CURRENT_SOURCE_DIR}/ray-gen.spv
+			${CMAKE_CURRENT_BINARY_DIR}/ray-gen.spv
 	BYPRODUCTS
-		ray-gen_f.spv ray-gen_test.spv
+		ray-gen.spv
 	COMMENT
 		"Compiling shaders.."
 	VERBATIM

@@ -16,6 +16,7 @@
 #include <Aura/Core/environment.hpp>
 #include <Aura/Core/render.hpp>
 // Standard includes.
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -28,7 +29,7 @@ namespace Aura::Core
 	/// Engine core module, it covers the program cycle and sets up all
 	/// other modules required for the application.
 	/// </summary>
-	class Nucleus
+	class Nucleus : public ThreadPool, public RNGesus
 	{
 		// Current application info.
 		Info const app_info;
@@ -36,16 +37,12 @@ namespace Aura::Core
 		DebugSettings debug_settings;
 		// Current display settings.
 		DisplaySettings display_settings;
-		// Core thread pool, contains the base thread pool control system.
-		ThreadPool thread_pool;
 		// Holds the window and all user related inputs callbacks.
 		UI ui;
 		// Holds the current loaded scene.
 		Environment environment;
 		// Holds the program render and render cycle.
 		Render render;
-		// God of entropy and unpredictability.
-		RNGesus rng;
 		// Render frame counter guard.
 		std::mutex frame_guard;
 		// Render frame counter.
@@ -54,8 +51,12 @@ namespace Aura::Core
 		std::uint32_t frame_limit;
 		// Render stop guard.
 		std::mutex stop_guard;
+		// Rendering flag.
+		std::condition_variable stop_event;
 		// Render stop flag.
 		bool stop;
+		// Rendering cycle situation.
+		bool rendering;
 
 		// All main modules can access the all nucleus parts.
 		friend class UI;

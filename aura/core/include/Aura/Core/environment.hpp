@@ -9,7 +9,9 @@
 // Internal includes.
 #include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
+#include <Aura/Core/Environment/structures.hpp>
 // Standard includes.
+#include <shared_mutex>
 // External includes.
 
 /// <summary>
@@ -28,6 +30,11 @@ namespace Aura::Core
 	{
 		// Nucleus handler.
 		Nucleus & core_nucleus;
+		public:
+		// Scene guard.
+		std::shared_mutex guard;
+		// Current loaded scene.
+		Scene * scene;
 
 		// ------------------------------------------------------------------ //
 		// Set-up and tear-down.
@@ -41,6 +48,15 @@ namespace Aura::Core
 		/// Stops rendering and tears-down the core.
 		/// </summary>
 		~Environment() noexcept;
+
+		// ------------------------------------------------------------------ //
+		// Scene modification.
+		// ------------------------------------------------------------------ //
+		public:
+		/// <summary>
+		/// Replaces created scene with the new given scene.
+		/// </summary>
+		void replaceScene(Scene * const new_scene);
 	};
 }
 

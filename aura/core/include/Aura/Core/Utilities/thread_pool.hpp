@@ -10,6 +10,7 @@
 #include <Aura/Core/types.hpp>
 // Standard includes.
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <mutex>

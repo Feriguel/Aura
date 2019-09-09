@@ -1,0 +1,45 @@
+// ========================================================================== //
+// File : ray_gen.comp
+//
+// Author : Miguel Ângelo Crespo Ferreira
+// ========================================================================== //
+#version 460
+
+// Decimal cases helper ->	0.123456789012345
+#define PRECISION			0.0000001
+#define PI					3.1415927
+// Workspace settings.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+// Ray launcher.
+layout(std140, set = 0, binding = 0) uniform RayLauncher {
+	vec3 origin;
+	vec3 top_left_corner;
+	vec3 horizontal;
+	vec3 vertical;
+	vec3 u;
+	vec3 v;
+	vec3 w;
+	float lens_radius;
+};
+// Output image.
+layout(rgba8, set = 1, binding = 0) uniform writeonly image2D frame;
+// Randomizer.
+layout(push_constant) uniform Randomizer {
+	float[2] random;
+};
+// Determines the direction to pixel. Applies a deviation based on the lens radius.
+vec3 pixelDirection(in const float s, in const float t)
+{
+	const vec3 offset = u * lens_radius * random[0] + v * lens_radius * random[1];
+	return normalize(top_left_corner - origin - offset + s * horizontal + t * vertical);
+}
+// Generates a ray for each workspace position. The work space should be the
+// output image dimensions.
+void main()
+{
+	const ivec2 pixel = ivec2(gl_GlobalInvocationID.s, gl_GlobalInvocationID.t);
+	const float s = float(pixel.s) / float(gl_WorkGroupSize.s * gl_NumWorkGroups.s);
+	const float t = float(pixel.t) / float(gl_WorkGroupSize.t * gl_NumWorkGroups.t);
+	const vec3 direction = pixelDirection(s, t);
+	imageStore(frame, pixel, vec4(direction, 1.0f));
+}

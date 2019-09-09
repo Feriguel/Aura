@@ -34,8 +34,8 @@ namespace Aura::Core
 		std::string const & app_name, std::uint16_t const & app_major,
 		std::uint16_t const & app_minor, std::uint16_t const & app_patch
 	) :
+		ThreadPool(std::thread::hardware_concurrency()),
 		app_info({ app_name, app_major, app_minor, app_patch }),
-		thread_pool(std::thread::hardware_concurrency()),
 		ui(*this), environment(*this), render(*this),
 		frame_counter(0U), frame_limit(0U), stop(true)
 	{
@@ -55,6 +55,10 @@ namespace Aura::Core
 	{
 		renderStop();
 		render.waitIdle();
+		{
+			std::unique_lock<std::mutex> lock { stop_guard };
+			stop_event.wait(lock, [&] { return !rendering; });
+		}
 		render.destroyFramework();
 		render.destroyDevice();
 		render.destroySurface();
@@ -70,10 +74,12 @@ namespace Aura::Core
 	/// </summary>
 	std::uint32_t Nucleus::run(std::uint32_t const max_frames)
 	{
-		if(max_frames != 0) { frameCounterReset(max_frames); }
+		if(stop) { renderStart(); }
+		frameCounterReset(max_frames);
 		while(!ui.shouldWindowClose())
 		{
 			ui.poolEvents();
+
 			if(renderShouldStop()) { break; }
 		}
 		return frame_counter;
@@ -85,6 +91,10 @@ namespace Aura::Core
 	/// </summary>
 	void Nucleus::renderCycle()
 	{
+		{
+			std::unique_lock<std::mutex> lock { stop_guard };
+			rendering = true;
+		}
 		while(true)
 		{
 			if(renderShouldStop()) { break; }
@@ -92,6 +102,11 @@ namespace Aura::Core
 			if(frame_limit == 0) { continue; }
 			if(result) { frameCounterIncrement(); }
 			if(frameCounterCheck()) { renderStop(); }
+		}
+		{
+			std::unique_lock<std::mutex> lock { stop_guard };
+			rendering = false;
+			stop_event.notify_all();
 		}
 	}
 	/// <summary>
@@ -128,7 +143,7 @@ namespace Aura::Core
 			std::unique_lock<std::mutex> lock { stop_guard };
 			stop = false;
 		}
-		auto f_void { thread_pool.enqueue([&] { renderCycle(); }) };
+		auto f_void { enqueue([&] { renderCycle(); }) };
 	}
 	/// <summary>
 	/// Checks if render should stop.
@@ -181,6 +196,10 @@ namespace Aura::Core
 		}
 		renderStop();
 		render.waitIdle();
+		{
+			std::unique_lock<std::mutex> lock { stop_guard };
+			stop_event.wait(lock, [&] { return !rendering; });
+		}
 		render.destroyFramework();
 		render.destroyDevice();
 		if(window_reset)

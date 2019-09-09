@@ -42,7 +42,7 @@ namespace Aura
 		/// </summary>
 		static inline Info const getEngineInfo() noexcept
 		{
-			return Info {"Aura", 0, 1, 0 };
+			return Info {"Aura", 0, 1, 1 };
 		}
 		/// <summary>
 		/// Builds the vulkan version.

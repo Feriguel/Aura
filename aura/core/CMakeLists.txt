@@ -13,7 +13,6 @@ cmake_minimum_required (VERSION 3.14...3.15 FATAL_ERROR)
 add_library(Core STATIC
 	"source/nucleus.cpp"
 	"source/ui.cpp"
-	"source/UI/window.cpp"
 	"source/environment.cpp"
 	"source/render.cpp"
 	"source/Render/ray-tracer.cpp"

@@ -41,9 +41,10 @@ namespace Aura::Core
 	/// </summary>
 	struct WorkTypes
 	{
-		static constexpr std::uint32_t n = 2;
+		static constexpr std::uint32_t n = 3U;
 		static constexpr std::uint32_t general_frame = 0U;
 		static constexpr std::uint32_t present_frame = 1U;
+		static constexpr std::uint32_t raygen = 2U;
 	};
 	/// <summary>
 	/// Englobes the queue and its respective family index.
@@ -130,15 +131,30 @@ namespace Aura::Core
 		// Command creation.
 		// ------------------------------------------------------------------ //
 		/// <summary>
+		/// Starts the command buffer record operation.
+		/// </summary>
+		void beginRecord(vk::CommandBufferUsageFlags const & flags,
+			vk::CommandBufferInheritanceInfo const & inheritance_info,
+			vk::CommandBuffer const & command) const;
+		/// <summary>
+		/// Ends the command buffer record operation.
+		/// </summary>
+		void endRecord(vk::CommandBuffer const & command) const;
+		/// <summary>
 		/// Changes current frame layout to general.
 		/// Used before render operations.
 		/// </summary>
 		vk::SubmitInfo const generalFrame() const;
 		/// <summary>
 		/// Changes current frame layout to present.
-		/// Used before after showing frame.
+		/// Used before showing frame.
 		/// </summary>
 		vk::SubmitInfo const presentFrame() const;
+		/// <summary>
+		/// Generates a set of rays, one for each pixel, according to scene camera.
+		/// Used before intersections.
+		/// </summary>
+		vk::SubmitInfo const rayGen() const;
 
 		// ------------------------------------------------------------------ //
 		// Vulkan set-up and tear-down related.
@@ -157,6 +173,47 @@ namespace Aura::Core
 		/// messaging.
 		/// </summary>
 		void terminateVulkan() noexcept;
+		/// <summary>
+		/// Creates a compute command pool with the given flags.
+		/// Throws any error that might occur.
+		/// </summary>
+		void createCommandPool(vk::CommandPoolCreateFlags const & flags,
+			std::uint32_t const & family, vk::CommandPool & pool) const;
+		/// <summary>
+		/// Destroys command pool.
+		/// </summary>
+		void destroyCommandPool(vk::CommandPool & pool) noexcept;
+		/// <summary>
+		/// Allocates N buffers at the target data pointer on the given command
+		/// pool with intended level.
+		/// Throws any error that might occur.
+		/// </summary>
+		void allocCommandBuffers(
+			vk::CommandPool const & pool, vk::CommandBufferLevel const & level,
+			std::uint32_t const & n_buffers, vk::CommandBuffer * const p_buffers) const;
+		/// <summary>
+		/// Frees N buffers at the target data pointer on the given command pool.
+		/// </summary>
+		void freeCommandBuffers(vk::CommandPool const & pool,
+			std::uint32_t const & n_buffers, vk::CommandBuffer * const p_buffers) noexcept;
+		/// <summary>
+		/// Creates a semaphore.
+		/// Throws any error that might occur.
+		/// </summary>
+		void createSemaphore(vk::SemaphoreCreateFlags const & flags, vk::Semaphore & semaphore) const;
+		/// <summary>
+		/// Destroys a semaphore.
+		/// </summary>
+		void destroySemaphore(vk::Semaphore & semaphore) noexcept;
+		/// <summary>
+		/// Create a fence.
+		/// Throws any error that might occur.
+		/// </summary>
+		void createFence(vk::FenceCreateFlags const & flags, vk::Fence & fence) const;
+		/// <summary>
+		/// Destroys a fence.
+		/// </summary>
+		void destroyFence(vk::Fence & fence) noexcept;
 		public:
 		/// <summary>
 		/// Creates the vulkan surface for the current window.

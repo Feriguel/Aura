@@ -74,8 +74,13 @@ namespace Aura::Test
 	TEST_F(CoreEnv, SixtyFrameLoop)
 	{
 		std::uint32_t frames { core->run(60U) };
-		std::cout << "Frames rendered: " << frames << "\n" << std::endl;
+		std::cout << "Frames rendered: " << frames << std::endl;
 		ASSERT_TRUE(frames >= 60U);
+	}
+	TEST_F(CoreEnv, InfLoop)
+	{
+		std::uint32_t frames { core->run() };
+		ASSERT_TRUE(frames == 0U);
 	}
 }
 

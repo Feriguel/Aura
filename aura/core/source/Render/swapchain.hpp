@@ -9,6 +9,7 @@
 // Internal includes.
 #include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
+#include "framework.hpp"
 // Standard includes.
 // External includes.
 #pragma warning(disable : 26495)
@@ -28,19 +29,11 @@ namespace Aura::Core
 		vk::CompositeAlphaFlagBitsKHR alpha_mode { vk::CompositeAlphaFlagBitsKHR::eOpaque };
 		vk::ComponentMapping mapping {};
 	};
-	class VulkanSwapchain
+	class VulkanSwapchain : public VulkanFramework
 	{
-		// External vulkan dispatcher.
-		vk::DispatchLoaderDynamic const & dispatch;
-		// External vulkan instance.
-		vk::Instance const & instance;
-		// External vulkan selected physical device.
-		vk::PhysicalDevice const & physical_device;
-		// Vulkan logic device.
-		vk::Device const & device;
+		protected:
 		// Vulkan framework handle.
 		vk::SurfaceKHR const & surface;
-		protected:
 		// Vulkan swap-chain image extent.
 		vk::Extent2D extent;
 		// Current swap-chain options.
@@ -63,20 +56,23 @@ namespace Aura::Core
 			vk::DispatchLoaderDynamic const & dispatch, vk::Instance const & instance,
 			vk::PhysicalDevice const & physical_device, vk::Device const & device,
 			vk::SurfaceKHR const & surface, vk::Extent2D const & base_extent,
-			std::vector<std::uint32_t> const & accessing_families) :
-			dispatch(dispatch), instance(instance),
-			physical_device(physical_device), device(device),
+			std::vector<std::uint32_t> accessing_families) :
+			VulkanFramework(dispatch, instance, physical_device, device),
 			surface(surface), extent(base_extent)
 		{
+			std::sort(accessing_families.begin(), accessing_families.end());
+			auto last = std::unique(accessing_families.begin(), accessing_families.end());
+			accessing_families.erase(last, accessing_families.end());
+
 			createSwapChain(accessing_families);
-			createImageViews();
+			createChainImageViews();
 		}
 		/// <summary>
 		/// Tears-down both swap-chain and swap-chain image views.
 		/// </summary>
 		virtual ~VulkanSwapchain() noexcept
 		{
-			destroyImageViews();
+			destroyChainImageViews();
 			destroySwapChain();
 		}
 
@@ -195,7 +191,7 @@ namespace Aura::Core
 			device.getSwapchainImagesKHR(
 				chain, &n_images, chain_images.data(), dispatch);
 		}
-		void destroySwapChain() const noexcept
+		void destroySwapChain() noexcept
 		{
 			device.destroySwapchainKHR(
 				chain, nullptr, dispatch);
@@ -203,32 +199,26 @@ namespace Aura::Core
 		/// <summary>
 		/// Creates an image view for each swap-chain image.
 		/// </summary>
-		void createImageViews()
+		void createChainImageViews()
 		{
-			std::uint32_t n_images { static_cast<std::uint32_t>(chain_images.size()) };
+			std::uint32_t const n_images { static_cast<std::uint32_t>(chain_images.size()) };
 			chain_views.resize(n_images);
 			for(std::uint32_t i { 0U }; i < n_images; ++i)
 			{
 				vk::ImageSubresourceRange const subresource {
 					vk::ImageAspectFlagBits::eColor, 0U, 1U, 0U, 1U };
-				vk::ImageViewCreateInfo const create_info { {},
-					chain_images[i], vk::ImageViewType::e2D, info.surface_format.format,
-					info.mapping, subresource };
-				vk::Result const result { device.createImageView(
-					&create_info, nullptr, &chain_views[i], dispatch) };
-				if(result != vk::Result::eSuccess)
-				{ vk::throwResultException(result, "createImageView"); }
+				createImageView({}, chain_images[i], vk::ImageViewType::e2D,
+					info.surface_format.format, info.mapping, subresource, chain_views[i]);
 			}
 		}
 		/// <summary>
 		/// Destroys all swap-chain image views.
 		/// </summary>
-		void destroyImageViews() const noexcept
+		void destroyChainImageViews() noexcept
 		{
 			for(std::size_t i { 0U }; i < chain_views.size(); ++i)
 			{
-				device.destroyImageView(
-					chain_views[i], nullptr, dispatch);
+				destroyImageView(chain_views[i]);
 			}
 		}
 

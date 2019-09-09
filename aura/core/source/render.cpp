@@ -63,22 +63,35 @@ namespace Aura::Core
 		bool const has_frame { framework->acquireframe(sem_general_frame, nullptr, 0, current_frame) };
 		if(!has_frame)
 		{ return false; }
+		// Update.
+		auto t1 = core_nucleus.enqueue([&]
+		{
+			framework->updateChainImageSet(current_frame);
+		});
+		auto t2 = core_nucleus.enqueue([&]
+		{
+			framework->updateRayLauncher(
+				core_nucleus.display_settings.width, core_nucleus.display_settings.height);
+		});
+
 		// Record layout transition for frame to general.
-		auto cmd_general = core_nucleus.thread_pool.enqueue([&]
-		{
-			return generalFrame();
-		});
+		auto cmd_general = core_nucleus.enqueue([&] { return generalFrame(); });
+		// Generate rays.
+		auto cmd_gen = core_nucleus.enqueue([&] { return rayGen(); });
 		// Record layout transition for frame to present.
-		auto cmd_present = core_nucleus.thread_pool.enqueue([&]
-		{
-			return presentFrame();
-		});
+		auto cmd_present = core_nucleus.enqueue([&] { return presentFrame(); });
 		// Submit all work.
-		std::array<vk::SubmitInfo, 2U> submit {
-			cmd_general.get(),
+		std::array<vk::SubmitInfo, 3U> submit {
+			cmd_general.get(), cmd_gen.get(),
 			cmd_present.get()
 		};
-		compute.queue.submit(2U, submit.data(), submit_fence, dispatch);
+
+		if(!t1.valid()) { throw std::future_error(std::future_errc::no_state); }
+		if(!t2.valid()) { throw std::future_error(std::future_errc::no_state); }
+		t1.wait();
+		t2.wait();
+
+		compute.queue.submit(3U, submit.data(), submit_fence, dispatch);
 		// Set frame to be displayed at the end.
 		if(!framework->displayFrame(1U, &sem_present_frame, current_frame, present.queue))
 		{ throw std::exception("Frame index out of bounds."); }
@@ -101,8 +114,29 @@ namespace Aura::Core
 	}
 
 	// ------------------------------------------------------------------ //
-	// Command creation.
+	// Commands.
 	// ------------------------------------------------------------------ //
+	/// <summary>
+	/// Starts the command buffer record operation.
+	/// </summary>
+	void Render::beginRecord(vk::CommandBufferUsageFlags const & flags,
+		vk::CommandBufferInheritanceInfo const & inheritance_info,
+		vk::CommandBuffer const & command) const
+	{
+		vk::CommandBufferBeginInfo const begin_info(flags, &inheritance_info);
+		vk::Result const result { command.begin(&begin_info, dispatch) };
+		if(result != vk::Result::eSuccess)
+		{ vk::throwResultException(result, "Command::Begin"); }
+	}
+	/// <summary>
+	/// Ends the command buffer record operation.
+	/// </summary>
+	void Render::endRecord(vk::CommandBuffer const & command) const
+	{
+		vk::Result const result { command.end(dispatch) };
+		if(result != vk::Result::eSuccess)
+		{ vk::throwResultException(result, "Command::End"); }
+	}
 	/// <summary>
 	/// Changes current frame layout to general. Used before render operations.
 	/// Must only be called by a pool thread.
@@ -112,13 +146,13 @@ namespace Aura::Core
 		ThreadCommands const & cmd { findThreadId() };
 		vk::CommandBuffer const & buffer { cmd.buff_comp[WorkTypes::general_frame] };
 
-		framework->beginRecord({}, {}, buffer);
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
 		framework->recordChainImageLayoutTransition(current_frame,
 			{}, vk::AccessFlagBits::eShaderWrite,
 			vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
 			compute.family, compute.family,
 			stage_flags[0], stage_flags[1], buffer);
-		framework->endRecord(buffer);
+		endRecord(buffer);
 		return vk::SubmitInfo {
 			1U, &sem_general_frame,
 			&stage_flags[0],
@@ -134,19 +168,39 @@ namespace Aura::Core
 		ThreadCommands const & cmd { findThreadId() };
 		vk::CommandBuffer const & buffer { cmd.buff_comp[WorkTypes::present_frame] };
 
-		framework->beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
-			{}, buffer);
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
 		framework->recordChainImageLayoutTransition(current_frame,
 			vk::AccessFlagBits::eShaderWrite, {},
 			vk::ImageLayout::eGeneral, vk::ImageLayout::ePresentSrcKHR,
 			compute.family, present.family,
 			stage_flags[1], stage_flags[3], buffer);
-		framework->endRecord(buffer);
+		endRecord(buffer);
 		return vk::SubmitInfo {
 			1U, &sem_general_frame,
 			&stage_flags[1],
 			1U, &buffer,
 			1U, &sem_present_frame };
+	}
+	/// <summary>
+	/// Changes current frame layout to general. Used before render operations.
+	/// Must only be called by a pool thread.
+	/// </summary>
+	vk::SubmitInfo const Render::rayGen() const
+	{
+		ThreadCommands const & cmd { findThreadId() };
+		vk::CommandBuffer const & buffer { cmd.buff_comp[WorkTypes::raygen] };
+
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
+		RandomOffset randoms { core_nucleus.gen(), core_nucleus.gen() };
+		framework->recordRayGen(core_nucleus.display_settings.width, core_nucleus.display_settings.height,
+			randoms, buffer);
+		endRecord(buffer);
+
+		return vk::SubmitInfo {
+			1U, &sem_general_frame,
+			&stage_flags[1],
+			1U, &buffer,
+			1U, &sem_general_frame };
 	}
 
 	// ------------------------------------------------------------------ //
@@ -241,13 +295,94 @@ namespace Aura::Core
 		instance.destroy(nullptr, dispatch);
 	}
 	/// <summary>
+	/// Creates a compute command pool with the given flags.
+	/// Throws any error that might occur.
+	/// </summary>
+	void Render::createCommandPool(vk::CommandPoolCreateFlags const & flags,
+		std::uint32_t const & family, vk::CommandPool & pool) const
+	{
+		vk::CommandPoolCreateInfo const create_info { flags, family };
+		vk::Result const result { device.createCommandPool(
+			&create_info, nullptr, &pool, dispatch) };
+		if(result != vk::Result::eSuccess)
+		{ vk::throwResultException(result, "createCommandPool"); }
+	}
+	/// <summary>
+	/// Destroys command pool.
+	/// </summary>
+	void Render::destroyCommandPool(vk::CommandPool & pool) noexcept
+	{
+		device.destroyCommandPool(pool, nullptr, dispatch);
+	}
+	/// <summary>
+	/// Allocates N buffers at the target data pointer on the given command
+	/// pool with intended level.
+	/// Throws any error that might occur.
+	/// </summary>
+	void Render::allocCommandBuffers(
+		vk::CommandPool const & pool, vk::CommandBufferLevel const & level,
+		std::uint32_t const & n_buffers, vk::CommandBuffer * const p_buffers) const
+	{
+		vk::CommandBufferAllocateInfo const alloc_info { pool, level, n_buffers };
+		vk::Result const result { device.allocateCommandBuffers(
+			&alloc_info, p_buffers, dispatch) };
+		if(result != vk::Result::eSuccess)
+		{ vk::throwResultException(result, "allocateCommandBuffers"); }
+	}
+	/// <summary>
+	/// Frees N buffers at the target data pointer on the given command pool.
+	/// </summary>
+	void Render::freeCommandBuffers(vk::CommandPool const & pool,
+		std::uint32_t const & n_buffers, vk::CommandBuffer * const p_buffers) noexcept
+	{
+		device.freeCommandBuffers(pool, n_buffers, p_buffers, dispatch);
+	}
+	/// <summary>
+	/// Creates a semaphore.
+	/// Throws any error that might occur.
+	/// </summary>
+	void Render::createSemaphore(vk::SemaphoreCreateFlags const & flags, vk::Semaphore & semaphore) const
+	{
+		vk::SemaphoreCreateInfo const create_info { flags };
+		vk::Result const result { device.createSemaphore(
+			&create_info, nullptr, &semaphore, dispatch) };
+		if(result != vk::Result::eSuccess)
+		{ vk::throwResultException(result, "createSemaphore"); }
+	}
+	/// <summary>
+	/// Destroys a semaphore.
+	/// </summary>
+	void Render::destroySemaphore(vk::Semaphore & semaphore) noexcept
+	{
+		device.destroySemaphore(semaphore, nullptr, dispatch);
+	}
+	/// <summary>
+	/// Create a fence.
+	/// Throws any error that might occur.
+	/// </summary>
+	void Render::createFence(vk::FenceCreateFlags const & flags, vk::Fence & fence) const
+	{
+		vk::FenceCreateInfo const create_info { flags };
+		vk::Result const result { device.createFence(
+			&create_info, nullptr, &fence, dispatch) };
+		if(result != vk::Result::eSuccess)
+		{ vk::throwResultException(result, "createFence"); }
+	}
+	/// <summary>
+	/// Destroys a fence.
+	/// </summary>
+	void Render::destroyFence(vk::Fence & fence) noexcept
+	{
+		device.destroyFence(fence, nullptr, dispatch);
+	}
+	/// <summary>
 	/// Creates the vulkan surface for the current window.
 	/// Throws any error that might occur.
 	/// </summary>
 	void Render::createSurface()
 	{
 		vk::Result result { static_cast<vk::Result>(glfwCreateWindowSurface(
-			static_cast<VkInstance>(instance), core_nucleus.ui.getWindow(),
+			static_cast<VkInstance>(instance), core_nucleus.ui.window,
 			nullptr, reinterpret_cast<VkSurfaceKHR *>(&surface))) };
 		if(result != vk::Result::eSuccess)
 		{ vk::throwResultException(result, "glfwCreateWindowSurface"); }
@@ -339,34 +474,29 @@ namespace Aura::Core
 	/// </summary>
 	void Render::createFramework()
 	{
-		std::vector<std::uint32_t> chain_access_families {
-			compute.family, present.family };
-		std::sort(chain_access_families.begin(), chain_access_families.end());
-		auto last = std::unique(chain_access_families.begin(), chain_access_families.end());
-		chain_access_families.erase(last, chain_access_families.end());
-
 		vk::Extent2D base_extent { 0U };
-		glfwGetFramebufferSize(core_nucleus.ui.getWindow(),
+		glfwGetFramebufferSize(core_nucleus.ui.window,
 			reinterpret_cast<int *>(&base_extent.width), reinterpret_cast<int *>(&base_extent.width));
 
 		vk::PhysicalDevice & physical_device = physical_devices[device_index].first;
 
-		framework = new RayTracer(
-			dispatch, instance, physical_device, device,
-			surface, base_extent, chain_access_families);
+		framework = new RayTracer(dispatch, instance, physical_device, device,
+			surface, base_extent, compute.family, transfer.family, present.family,
+			static_cast<ThreadPool &>(core_nucleus), core_nucleus.environment.guard,
+			core_nucleus.environment.scene);
 
 		for(size_t i = 0; i < thread_commands.size(); i++)
 		{
-			framework->createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+			createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
 				compute.family, thread_commands[i].pool_comp);
-			framework->allocCommandBuffers(thread_commands[i].pool_comp,
+			allocCommandBuffers(thread_commands[i].pool_comp,
 				vk::CommandBufferLevel::ePrimary,
 				WorkTypes::n, thread_commands[i].buff_comp.data());
 		}
 
-		framework->createSemaphore({}, sem_general_frame);
-		framework->createSemaphore({}, sem_present_frame);
-		framework->createFence({}, submit_fence);
+		createSemaphore({}, sem_general_frame);
+		createSemaphore({}, sem_present_frame);
+		createFence({}, submit_fence);
 	}
 	/// <summary>
 	/// Destroys the framework created on the selected device. Must be used
@@ -374,15 +504,15 @@ namespace Aura::Core
 	/// </summary>
 	void Render::destroyFramework() noexcept
 	{
-		framework->destroyFence(submit_fence);
-		framework->destroySemaphore(sem_present_frame);
-		framework->destroySemaphore(sem_general_frame);
+		destroyFence(submit_fence);
+		destroySemaphore(sem_present_frame);
+		destroySemaphore(sem_general_frame);
 
 		for(size_t i = 0; i < thread_commands.size(); i++)
 		{
-			framework->freeCommandBuffers(thread_commands[i].pool_comp,
+			freeCommandBuffers(thread_commands[i].pool_comp,
 				WorkTypes::n, thread_commands[i].buff_comp.data());
-			framework->destroyCommandPool(thread_commands[i].pool_comp);
+			destroyCommandPool(thread_commands[i].pool_comp);
 		}
 
 		delete framework;
@@ -476,7 +606,7 @@ namespace Aura::Core
 	void Render::prepareThreads() noexcept
 	{
 		std::vector<std::thread::id> indices {};
-		core_nucleus.thread_pool.threadIndices(indices);
+		core_nucleus.threadIndices(indices);
 		thread_commands.resize(indices.size());
 		for(size_t i = 0; i < indices.size(); i++)
 		{

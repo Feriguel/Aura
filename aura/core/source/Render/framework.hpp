@@ -56,129 +56,6 @@ namespace Aura::Core
 		{}
 
 		// ------------------------------------------------------------------ //
-		// Command recording.
-		// ------------------------------------------------------------------ //
-		public:
-		/// <summary>
-		/// Starts the command buffer record operation.
-		/// </summary>
-		void beginRecord(vk::CommandBufferUsageFlags const & flags,
-			vk::CommandBufferInheritanceInfo const & inheritance_info,
-			vk::CommandBuffer const & command) const
-		{
-			vk::CommandBufferBeginInfo const begin_info(flags, &inheritance_info);
-			vk::Result const result { command.begin(&begin_info, dispatch) };
-			if(result != vk::Result::eSuccess)
-			{ vk::throwResultException(result, "Command::Begin"); }
-		}
-		/// <summary>
-		/// Ends the command buffer record operation.
-		/// </summary>
-		void endRecord(vk::CommandBuffer const & command) const
-		{
-			vk::Result const result { command.end(dispatch) };
-			if(result != vk::Result::eSuccess)
-			{ vk::throwResultException(result, "Command::End"); }
-		}
-		/// <summary>
-		/// Sets primary buffer to execute all underlying secondary commands
-		/// in list order.
-		/// Must be only used by the main thread.
-		/// </summary>
-		void executeSecondaryCommands(vk::CommandBuffer const & primary_buffer,
-			std::uint32_t const & n_secondary_buffers,
-			vk::CommandBuffer const * const p_secondary_buffers) const
-		{
-			primary_buffer.executeCommands(
-				n_secondary_buffers, p_secondary_buffers, dispatch);
-		}
-
-		// ------------------------------------------------------------------ //
-		// External command and synchronization.
-		// ------------------------------------------------------------------ //
-		public:
-		/// <summary>
-		/// Creates a compute command pool with the given flags.
-		/// Throws any error that might occur.
-		/// </summary>
-		void createCommandPool(vk::CommandPoolCreateFlags const & flags,
-			std::uint32_t const & family, vk::CommandPool & pool) const
-		{
-			vk::CommandPoolCreateInfo const create_info { flags, family };
-			vk::Result const result { device.createCommandPool(
-				&create_info, nullptr, &pool, dispatch) };
-			if(result != vk::Result::eSuccess)
-			{ vk::throwResultException(result, "createCommandPool"); }
-		}
-		/// <summary>
-		/// Destroys command pool.
-		/// </summary>
-		void destroyCommandPool(vk::CommandPool & pool) const noexcept
-		{
-			device.destroyCommandPool(pool, nullptr, dispatch);
-		}
-		/// <summary>
-		/// Allocates N buffers at the target data pointer on the given command
-		/// pool with intended level.
-		/// Throws any error that might occur.
-		/// </summary>
-		void allocCommandBuffers(vk::CommandPool const & pool, vk::CommandBufferLevel const & level,
-			std::uint32_t const & n_buffers, vk::CommandBuffer * const p_buffers) const
-		{
-			vk::CommandBufferAllocateInfo const alloc_info { pool, level, n_buffers };
-			vk::Result const result { device.allocateCommandBuffers(
-				&alloc_info, p_buffers, dispatch) };
-			if(result != vk::Result::eSuccess)
-			{ vk::throwResultException(result, "allocateCommandBuffers"); }
-		}
-		/// <summary>
-		/// Frees N buffers at the target data pointer on the given command pool.
-		/// </summary>
-		void freeCommandBuffers(vk::CommandPool const & pool,
-			std::uint32_t const & n_buffers, vk::CommandBuffer * const p_buffers) const noexcept
-		{
-			device.freeCommandBuffers(pool, n_buffers, p_buffers, dispatch);
-		}
-		/// <summary>
-		/// Creates a semaphore.
-		/// Throws any error that might occur.
-		/// </summary>
-		void createSemaphore(vk::SemaphoreCreateFlags const & flags, vk::Semaphore & semaphore) const
-		{
-			vk::SemaphoreCreateInfo const create_info { flags };
-			vk::Result const result { device.createSemaphore(
-				&create_info, nullptr, &semaphore, dispatch) };
-			if(result != vk::Result::eSuccess)
-			{ vk::throwResultException(result, "createSemaphore"); }
-		}
-		/// <summary>
-		/// Destroys a semaphore.
-		/// </summary>
-		void destroySemaphore(vk::Semaphore & semaphore) const noexcept
-		{
-			device.destroySemaphore(semaphore, nullptr, dispatch);
-		}
-		/// <summary>
-		/// Create a fence.
-		/// Throws any error that might occur.
-		/// </summary>
-		void createFence(vk::FenceCreateFlags const & flags, vk::Fence & fence) const
-		{
-			vk::FenceCreateInfo const create_info { flags };
-			vk::Result const result { device.createFence(
-				&create_info, nullptr, &fence, dispatch) };
-			if(result != vk::Result::eSuccess)
-			{ vk::throwResultException(result, "createFence"); }
-		}
-		/// <summary>
-		/// Destroys a fence.
-		/// </summary>
-		void destroyFence(vk::Fence & fence) const noexcept
-		{
-			device.destroyFence(fence, nullptr, dispatch);
-		}
-
-		// ------------------------------------------------------------------ //
 		// Resources.
 		// ------------------------------------------------------------------ //
 		protected:
@@ -187,31 +64,31 @@ namespace Aura::Core
 		/// </summary>
 		void createDescriptorSetLayout(vk::DescriptorSetLayoutCreateFlags const & flags,
 			std::uint32_t const & n_bindings, vk::DescriptorSetLayoutBinding const * const p_bindings,
-			vk::DescriptorSetLayout & set) const
+			vk::DescriptorSetLayout & set_layout) const
 		{
 			vk::DescriptorSetLayoutCreateInfo const create_info { flags,
 				n_bindings, p_bindings };
 			vk::Result const result { device.createDescriptorSetLayout(
-				&create_info, nullptr, &set, dispatch) };
+				&create_info, nullptr, &set_layout, dispatch) };
 			if(result != vk::Result::eSuccess)
 			{ vk::throwResultException(result, "createDescriptorSetLayout"); }
 		}
 		/// <summary>
 		/// Destroys a descriptor set layout.
 		/// </summary>
-		void destroyDescriptorSetLayout(vk::DescriptorSetLayout & set) const noexcept
+		void destroyDescriptorSetLayout(vk::DescriptorSetLayout & set_layout) const noexcept
 		{
-			device.destroyDescriptorSetLayout(set, nullptr, dispatch);
+			device.destroyDescriptorSetLayout(set_layout, nullptr, dispatch);
 		}
 		/// <summary>
 		/// Creates a descriptors set layouts with the given N bindings.
 		/// </summary>
 		void createDescriptorPool(vk::DescriptorPoolCreateFlags const & flags,
-			std::uint32_t const & max_sets, std::uint32_t const & n_pools,
-			vk::DescriptorPoolSize const * const p_pools, vk::DescriptorPool & pool) const
+			std::uint32_t const & max_sets, std::uint32_t const & n_sizes,
+			vk::DescriptorPoolSize const * const p_sizes, vk::DescriptorPool & pool) const
 		{
 			vk::DescriptorPoolCreateInfo const create_info { flags, max_sets,
-				n_pools, p_pools };
+				n_sizes, p_sizes };
 			vk::Result const result { device.createDescriptorPool(
 				&create_info, nullptr, &pool, dispatch) };
 			if(result != vk::Result::eSuccess)
@@ -230,12 +107,12 @@ namespace Aura::Core
 		/// Throws any error that might occur.
 		/// </summary>
 		void allocateDescriptorSets(vk::DescriptorPool const & pool,
-			std::uint32_t const & n_sets, vk::DescriptorSetLayout const * const p_sets,
-			vk::DescriptorSet * const p_descriptors) const
+			std::uint32_t const & n_sets, vk::DescriptorSetLayout const * const p_layouts,
+			vk::DescriptorSet * const p_sets) const
 		{
-			vk::DescriptorSetAllocateInfo const alloc_info { pool, n_sets, p_sets };
+			vk::DescriptorSetAllocateInfo const alloc_info { pool, n_sets, p_layouts };
 			vk::Result const result { device.allocateDescriptorSets(
-				&alloc_info, p_descriptors, dispatch) };
+				&alloc_info, p_sets, dispatch) };
 			if(result != vk::Result::eSuccess)
 			{ vk::throwResultException(result, "allocateDescriptorSets"); }
 		}
@@ -248,6 +125,28 @@ namespace Aura::Core
 			device.freeDescriptorSets(pool, n_descriptors, p_descriptors, dispatch);
 		}
 		/// <summary>
+		/// Creates an image view for each swap-chain image.
+		/// </summary>
+		void createImageView(vk::ImageViewCreateFlags const & flags,
+			vk::Image const & image, vk::ImageViewType const & type, vk::Format const & format,
+			vk::ComponentMapping const & mapping, vk::ImageSubresourceRange const & subresource,
+			vk::ImageView & view)
+		{
+			vk::ImageViewCreateInfo const create_info { flags, image, type,
+				format, mapping, subresource };
+			vk::Result const result { device.createImageView(
+				&create_info, nullptr, &view, dispatch) };
+			if(result != vk::Result::eSuccess)
+			{ vk::throwResultException(result, "createImageView"); }
+		}
+		/// <summary>
+		/// Destroys all swap-chain image views.
+		/// </summary>
+		void destroyImageView(vk::ImageView & view) const noexcept
+		{
+			device.destroyImageView(view, nullptr, dispatch);
+		}
+		/// <summary>
 		/// Creates a buffer with the given size and usage and accessing queues.
 		/// Throws any error that might occur.
 		/// </summary>
@@ -256,7 +155,7 @@ namespace Aura::Core
 			std::uint32_t const & n_families, std::uint32_t const * const p_families,
 			vk::Buffer & buffer) const
 		{
-			if(n_families > 1)
+			if(n_families == 1)
 			{
 				vk::BufferCreateInfo const create_info { flags, size, usage,
 					vk::SharingMode::eExclusive, n_families, p_families };
@@ -320,7 +219,7 @@ namespace Aura::Core
 		}
 
 		// ------------------------------------------------------------------ //
-		// Generic pipeline framework.
+		//Pipeline.
 		// ------------------------------------------------------------------ //
 		/// <summary>
 		/// Creates a shader module using the SPIR-V file at path.
@@ -368,6 +267,27 @@ namespace Aura::Core
 		void destroyPipelineLayout(vk::PipelineLayout & layout) const noexcept
 		{
 			device.destroyPipelineLayout(layout, nullptr, dispatch);
+		}
+		/// <summary>
+		/// Creates N pipelines based on the supplied create infos. Multiple
+		/// pipeline creations should be used only if there are derivatives as
+		/// multi-threading pipeline creation is better otherwise.
+		/// Throws any error that might occur.
+		/// </summary>
+		void createComputePipelines(vk::PipelineCache const & cache, std::uint32_t const & n_pipelines,
+			vk::ComputePipelineCreateInfo const * const create_infos, vk::Pipeline * const p_pipelines) const
+		{
+			vk::Result const result { device.createComputePipelines(
+				cache, n_pipelines, create_infos, nullptr, p_pipelines, dispatch) };
+			if(result != vk::Result::eSuccess)
+			{ vk::throwResultException(result, "createComputePipelines"); }
+		}
+		/// <summary>
+		/// Destroys a pipeline.
+		/// </summary>
+		void destroyPipeline(vk::Pipeline & pipeline) const noexcept
+		{
+			device.destroyPipeline(pipeline, nullptr, dispatch);
 		}
 
 		// ------------------------------------------------------------------ //

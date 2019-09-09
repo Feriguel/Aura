@@ -1,0 +1,520 @@
+#version 460
+#extension GL_ARB_separate_shader_objects : enable
+
+// Workspace settings.
+layout ( local_size_x = 16, local_size_y = 16, local_size_z = 1 ) in;
+
+//                          0.123456789012345
+#define PRECISION           0.000000000000001
+#define PI                  3.141592653589793
+
+#define MAX_PRIMITIVES      2500
+#define MAX_BOUNCES         3
+#define ANTIALIASING        1
+
+#define PRIMITIVE_EMPTY     0
+#define PRIMITIVE_SPHERE    1
+#define PRIMITIVE_CUBOID    2
+#define PRIMITIVE_TRIANGLE  3
+#define PRIMITIVE_QUAD      4
+
+#define MATERIAL_BOUNDING   0
+#define MATERIAL_TEST       1
+#define MATERIAL_DIFFUSE    2
+#define MATERIAL_SPECULAR   3
+
+// Object declarations. ===========================================================================
+
+struct Material
+{
+	dvec4 info;
+	dvec4 colour;
+};
+struct Primitive
+{
+	dvec4 info_1;
+	dvec4 info_2;
+	dvec4 info_3;
+	Material material;
+};
+struct Camera
+{
+	dvec4 origin;
+	dvec4 horizontal_and_width;
+	dvec4 vertical_and_height;
+	dvec4 corner;
+};
+struct Ray
+{
+	dvec4 origin_and_depth;
+	dvec4 direction;
+};
+struct Hit_Info
+{
+	dvec4 point_and_time;
+	dvec4 normal_and_index;
+};
+
+// Inputs. ========================================================================================
+
+// Ray-tracing render output image.
+layout(rgba8, binding = 0) uniform writeonly image2D render_output;
+// Ray launcher settings.
+layout(std140, binding = 1) uniform Ray_Launcher
+{
+	Camera settings;
+}
+camera;
+// World elements list.
+layout(std140, binding = 2) buffer World_Elements
+{
+	Primitive[MAX_PRIMITIVES] elements;
+}
+world;
+
+// Ray scattering functions. ======================================================================
+
+// Generates a new ray for the material reflection, distinct material types have distinct
+// reflection genres.
+bool reflection_ray(in Ray ray, in Hit_Info final_hit, in Material material, inout Ray new_ray)
+{
+	// Emissive materials have no refractions or reflections.
+	if (material.colour.w > 1.0)
+	{
+		return false;
+	}
+	// Vector normal.
+	const dvec3 normal = final_hit.normal_and_index.xyz;
+	// Old ray direction.
+	const dvec3 old_direction = ray.direction.xyz;
+	// New ray direction.
+	dvec3 new_direction;
+	// Generate refractions according to material type.
+	if (uint(material.info.w) == MATERIAL_SPECULAR)
+	{
+		// New ray direction.
+		new_direction = reflect(old_direction, normal);
+		// Add fuzziness factor, if any.
+		const double fuzziness = material.info.y;
+		if (fuzziness > 0.0)
+		{
+			const dvec3 randomiser = random_in_unit_sphere(old_direction + normal);
+			new_direction += fuzziness * randomiser;
+		}
+		new_ray.direction.xyz = new_direction;
+		return true;
+	}
+	else
+	{
+		// Diffuse reflection randomiser.
+		const dvec3 randomiser = random_in_unit_sphere(old_direction + normal);
+		// New ray direction.
+		new_direction = normal + randomiser;
+		// Update new ray direction.
+		if (new_direction.length() == 0)
+		{
+			new_ray.direction.xyz = normal;
+			return true;
+		}
+		new_ray.direction.xyz = new_direction;
+		return true;
+	}
+}
+// Christophe Schlick approximation.
+double schlick (in float cosine, in double refract_index)
+{
+	double r0 = (1 - refract_index) / (1 + refract_index);
+	r0 = r0 * r0;
+	return r0 + (1 - r0) * pow( (1 - cosine), 5 );
+}
+
+// Generates a new ray for the material refraction.
+bool refraction_ray(in Ray ray, in Hit_Info final_hit, in Material material, inout Ray new_ray)
+{
+	// Emissive materials have no refractions or reflections.
+	if (material.colour.w >= 1.0)
+	{
+		return false;
+	}
+	// Refraction index.
+	const double refract_index = material.info.z;
+	// Vector normal.
+	const dvec3 normal = final_hit.normal_and_index.xyz;
+	// Old ray direction.
+	const dvec3 old_direction = normalize(ray.direction.xyz);
+	// New ray direction.
+	const dvec3 new_direction = refract(old_direction, normal, 1.0 / refract_index);
+	// Schlick cosine.
+	const float cosine = float(-dot(old_direction, normal) / old_direction.length());
+	// Reflect probability.
+	double reflect_probability = 1.0;
+	// Check for refractions.
+	if (new_direction == dvec3(0.0)){ return false; }
+	// Check if ray will be reflected or refracted.
+	reflect_probability = schlick(cosine, refract_index);
+	if (rand(vec2(new_direction.xy + normal.xy)) < reflect_probability) { return false; }
+	// Return refraction.
+	new_ray.direction.xyz = normalize(new_direction);
+	return true;
+}
+// Ray scattering function.
+bool scatterRay (in Ray ray, in Hit_Info final_hit, inout Ray scattered)
+{
+	// Current ray depth.
+	const uint depth = uint(ray.origin_and_depth.w);
+	// Build new rays if not at maximum bounces.
+	if (depth < MAX_BOUNCES - 1)
+	{
+		// Intersection index.
+		const uint index = uint(final_hit.normal_and_index.w);
+		// Intersected material type.
+		const Material material = world.elements[index].material;
+		// Check if has refraction.
+		if (refraction_ray(ray, final_hit, material, scattered))
+		{
+			scattered.origin_and_depth = dvec4(final_hit.point_and_time.xyz, depth + 1);
+			return true;
+		}
+		// If has no refraction, check if has reflection.
+		else if (reflection_ray(ray, final_hit, material, scattered))
+		{
+			scattered.origin_and_depth = dvec4(final_hit.point_and_time.xyz, depth + 1);
+			return true;
+		}
+	}
+	return false;
+}
+
+// Intersection functions. ========================================================================
+
+// Determines whenever a sphere is hit or not according to the equation:
+//
+//      t*t*dot(B,B) + 2*t*dot(A-C,A-C) + dot(C,C) - R*R = 0
+//
+// Where A = ray.origin, B = ray.direction, C = sphere.center, R = sphere.radius.
+bool hitSphere (in Ray ray, in Primitive sphere, inout Hit_Info hit)
+{
+	// Calculate quadratic constants.
+	const dvec3 origin_to_center = ray.origin_and_depth.xyz - sphere.info_1.xyz;
+	const double a = dot(ray.direction.xyz, ray.direction.xyz);
+	const double b = 2.0 * dot(origin_to_center, ray.direction.xyz);
+	const double c = dot(origin_to_center, origin_to_center) - sphere.info_2.x * sphere.info_2.x;
+	const double descriminant = b * b - 4.0 * a * c;
+	// Determine type of solution.
+	if (descriminant > PRECISION)
+	{
+		// Calculate both roots.
+		const double root = sqrt(descriminant);
+		const double divisor = 2.0 * a;
+		const double t_negative = (-b - root) / divisor;
+		const double t_positive = (-b + root) / divisor;
+		// Check if both t are negative or 0, and ignore collision if both are true.
+		const bool ignore_negative = t_negative < PRECISION;
+		const bool ignore_positive = t_positive < PRECISION;
+		if (ignore_negative && ignore_positive)
+		{
+			return false;
+		}
+		// Choose best t and calculate/store hit information.
+		const double t = ignore_negative ? t_positive : t_negative;
+		hit.point_and_time.w = t;
+		hit.point_and_time.xyz = ray.origin_and_depth.xyz + ray.direction.xyz * t;
+		const dvec3 normal = normalize(hit.point_and_time.xyz - sphere.info_1.xyz);
+		hit.normal_and_index.xyz = ignore_negative ? -normal : normal;
+		return true;
+	}
+	return false;
+}
+// Determines whenever a cuboid is hit or not.
+//
+// First verifies if within x and y area.
+// Then checks the z area.
+// If any of these fail there is no intersection.
+bool hitCuboid (in Ray ray, in Primitive cuboid, inout Hit_Info hit)
+{
+	// Calculate inverse of direction.
+	const dvec3 inverted_dir = 1.0 / ray.direction.xyz;
+	// Time to p1 and p2 planes.
+	const dvec3 t_p1 = (cuboid.info_1.xyz - ray.origin_and_depth.xyz) * inverted_dir;
+	const dvec3 t_p2 = (cuboid.info_2.xyz - ray.origin_and_depth.xyz) * inverted_dir;
+	// X minimum and maximum.
+	const bool inv_x = (inverted_dir.x < 0);
+	double t_min = inv_x ? t_p2.x : t_p1.x;
+	double t_max = inv_x ? t_p1.x : t_p2.x;
+	// Y minimum and maximum, check and minimum/maximum swap.
+	const bool inv_y = (inverted_dir.y < 0);
+	const double ty_min = inv_y ? t_p2.y : t_p1.y;
+	const double ty_max = inv_y ? t_p1.y : t_p2.y;
+	if ((t_min > ty_max) || (ty_min > t_max)) return false;
+	t_min = max(t_min, ty_min);
+	t_max = min(t_max, ty_max);
+	// Z minimum and maximum, check and minimum swap.
+	const bool inv_z = (inverted_dir.z < 0);
+	const double tz_min = inv_z ? t_p2.z : t_p1.z;
+	const double tz_max = inv_z ? t_p1.z : t_p2.z;
+	if ((t_min > tz_max) || (tz_min > t_max)) return false;
+	t_min = max(t_min, tz_min);
+	t_max = min(t_max, tz_max);
+	// Use only the positive values;
+	bool inside = false;
+	if (t_min <= PRECISION)
+	{
+		t_min = t_max;
+		inside = true;
+	}
+	// If both are negative, the cube is behind the ray.
+	if (t_min <= PRECISION) { return false; }
+	// Calculate normal by choosing three square corners according to the t_min location.
+	dvec3 normal;
+	if (t_min == t_p1.x)
+	{
+		const dvec3 corner_1 = cuboid.info_1.xyz;
+		const dvec3 corner_2 = dvec3(corner_1.x, cuboid.info_2.y, corner_1.z);
+		const dvec3 corner_3 = dvec3(corner_1.xy, cuboid.info_2.z);
+		normal = cross(corner_1 - corner_2, corner_3 - corner_1);
+	}
+	else if (t_min == t_p2.x)
+	{
+		const dvec3 corner_1 = cuboid.info_2.xyz;
+		const dvec3 corner_2 = dvec3(corner_1.x, cuboid.info_1.y, corner_1.z);
+		const dvec3 corner_3 = dvec3(corner_1.xy, cuboid.info_1.z);
+		normal = cross(corner_1 - corner_3, corner_2 - corner_1);
+	}
+	else if (t_min == t_p1.y)
+	{
+		const dvec3 corner_1 = cuboid.info_1.xyz;
+		const dvec3 corner_2 = dvec3(cuboid.info_2.x, corner_1.yz);
+		const dvec3 corner_3 = dvec3(corner_1.xy, cuboid.info_2.z);
+		normal = cross(corner_1 - corner_3, corner_2 - corner_1);
+	}
+	else if (t_min == t_p2.y)
+	{
+		const dvec3 corner_1 = cuboid.info_2.xyz;
+		const dvec3 corner_2 = dvec3(cuboid.info_1.x, corner_1.yz);
+		const dvec3 corner_3 = dvec3(corner_1.xy, cuboid.info_1.z);
+		normal = cross(corner_1 - corner_2, corner_3 - corner_1);
+	}
+	else if (t_min == t_p1.z)
+	{
+		const dvec3 corner_1 = cuboid.info_1.xyz;
+		const dvec3 corner_2 = dvec3(cuboid.info_2.x, corner_1.yz);
+		const dvec3 corner_3 = dvec3(corner_1.x, cuboid.info_2.y, corner_1.z);
+		normal = cross(corner_1 - corner_2, corner_3 - corner_1);
+	}
+	else
+	{
+		const dvec3 corner_1 = cuboid.info_2.xyz;
+		const dvec3 corner_2 = dvec3(cuboid.info_1.x, corner_1.yz);
+		const dvec3 corner_3 = dvec3(corner_1.x, cuboid.info_1.y, corner_1.z);
+		normal = cross(corner_1 - corner_3, corner_2 - corner_1);
+	}
+	if (inside) { normal = -normal; }
+	// Calculate point.
+	const dvec3 point = ray.origin_and_depth.xyz + t_min * ray.direction.xyz;
+	// Return successful.
+	hit.point_and_time.w = t_min;
+	hit.point_and_time.xyz = point;
+	hit.normal_and_index.xyz = normalize(normal);
+	return true;
+}
+// Determines whenever a triangle is hit or not.
+//
+// ???
+bool hitTriangle (in Ray ray, in Primitive triangle, inout Hit_Info hit)
+{
+	const dvec3 edge_1 = triangle.info_2.xyz - triangle.info_1.xyz;
+	const dvec3 edge_2 = triangle.info_3.xyz - triangle.info_1.xyz;
+	const dvec3 p_vec = cross(ray.direction.xyz, edge_2);
+	const double det = dot(edge_1, p_vec);
+	// If a is between the PRECISION limit, ray is parallel to the triangle.
+	if ( abs(det) < PRECISION ) { return false; }
+
+	const double inv_det = 1.0/det;
+	const dvec3 t_vec = ray.origin_and_depth.xyz - triangle.info_1.xyz;
+	const double u = inv_det * dot(t_vec, p_vec);
+	// Test bounds.
+	if (u < 0.0 || u > 1.0) { return false; }
+
+	const dvec3 q_vec = cross(t_vec, edge_1);
+	const double v = inv_det * dot(ray.direction.xyz, q_vec);
+	// Test bounds.
+	if (v < 0.0 || u + v > 1.0) { return false; }
+
+	const double t = inv_det * dot(edge_2, q_vec);
+	// Intersection is behind origin.
+	if (t < PRECISION) { return false; }
+
+	// Return successful.
+	hit.point_and_time.w = t;
+	hit.point_and_time.xyz = ray.origin_and_depth.xyz + t * ray.direction.xyz;
+	hit.normal_and_index.xyz = normalize(cross(edge_1, edge_2) * det);
+	return true;
+}
+// Selects the correct hit type according to the primitive type field.
+bool hitSelector(in Ray ray, in Primitive primitive, inout Hit_Info hit)
+{
+	// Primitive type.
+	const uint primitive_type = uint(primitive.info_1.w);
+	// Determine intersection.
+	if (primitive_type == PRIMITIVE_SPHERE) { return hitSphere(ray, primitive, hit); }
+	else if (primitive_type == PRIMITIVE_CUBOID) { return hitCuboid(ray, primitive, hit); }
+	else if (primitive_type == PRIMITIVE_TRIANGLE) { return hitTriangle(ray, primitive, hit); }
+	else if (primitive_type == PRIMITIVE_TRIANGLE) { 
+	
+		return hitQuad(ray, primitive, hit); // Two hit triangle 0 1 2 && 0 2 3
+	}
+	else { return false; }
+}
+// Finds the first intersection for the ray.
+bool intersectWorld(in Ray ray, inout Hit_Info final_hit)
+{
+	// Has intersection flag.
+	bool has_hit = false;
+	// Verify all primitives.
+	for (uint i = 0; i < MAX_PRIMITIVES; ++i)
+	{
+		// Current primitive type.
+		const uint primitive_type = uint(world.elements[i].info_1.w);
+		// If there are no more objects stops.
+		if (primitive_type == PRIMITIVE_EMPTY) { break; }
+		// This hit information.
+		Hit_Info hit = Hit_Info(dvec4(0.0), dvec4(0.0));
+		// Check intersection.
+		if (hitSelector(ray, world.elements[i], hit))
+		{
+			// Current material type.
+			const uint material_type = uint(world.elements[i].material.info.w);
+			// If material is not bounding, updates hit.
+			if (material_type != MATERIAL_BOUNDING)
+			{
+				// Add index to hit and update.
+				hit.normal_and_index.w = i;
+				// Hit already found.
+				if (has_hit)
+				{
+					// If final_hit distance is bigger, replace it with new hit.
+					if (final_hit.point_and_time.w > hit.point_and_time.w) { final_hit = hit; }
+				}
+				// Replace final_hit with hit and updates hit flag.
+				else
+				{ has_hit = true; final_hit = hit; }
+			}
+		}
+	}
+	return has_hit;
+}
+
+// ClosestHit and Miss Functions. =================================================================
+
+// Returns a colour of a world intersection according to its material type, or the background if a
+// miss.
+dvec3 colourWorldHit (dvec3 normal, Material material)
+{
+	dvec3 colour;
+	// Determine colour.
+	if (uint(material.info.w) == MATERIAL_TEST) { colour = normalize(dvec3(1.0) + normal); }
+	else { colour = material.colour.xyz; }
+	// Update with alpha, transparency.
+	if (material.colour.w < 1.0) { return dvec3(1.0) - colour * material.colour.w; }
+	// Update with alpha, emission.
+	if (material.colour.w > 1.0) { return colour * material.colour.w; }
+	// No transparency or emission.
+	return colour;
+}
+
+// Determines the background colour according to a gradient between blue and white. Where, window
+// top is azure and window bottom is white.
+dvec3 background (in Ray ray)
+{
+	//return dvec3(0.0);
+	// Current vertical ratio [0, 1];
+	const double v_ratio = 0.5 * (ray.direction.y + 1.0);
+	// Colour between azure and white.
+	return (1.0 - v_ratio) * dvec3(1.0, 1.0, 1.0) + v_ratio * dvec3(0.2, 0.6, 1.0);
+}
+// Updates the given colour and attenuation intersected material.
+void colourHit(inout dvec3 colour, inout dvec3 attenuation, in bool end, in dvec3 normal, in Material material)
+{
+	if (material.colour.w > 1.0)
+	{
+		colour += colourWorldHit(normal, material) * attenuation;
+		return;
+	}
+	if (end)
+	{
+		return;
+	}
+	attenuation *= colourWorldHit(normal, material);
+	return;
+}
+// Updates the given colour according to the ray and the background function.
+void colourMiss(inout dvec3 colour, in dvec3 attenuation, in Ray ray)
+{
+	colour += attenuation * background(ray);
+	return;
+}
+
+// Cycle function. ================================================================================
+
+// Ray render cycle, calculates ray intersections its resulting colour.
+dvec3 render (in Ray ray)
+{
+	// Final colour and current attenuation.
+	dvec3 colour = dvec3(0.0);
+	dvec3 attenuation = dvec3(1.0);
+	// Cycle info.
+	Ray[MAX_BOUNCES] rays;
+	rays[0] = ray;
+	uint total_rays = 0;
+	// Intersection information.
+	Hit_Info final_hit = Hit_Info(dvec4(0.0), dvec4(0.0));
+	// Repeat intersections for all found rays.
+	for (int i = 0; i < MAX_BOUNCES; ++i)
+	{
+		// Intersect.
+		const bool hit = intersectWorld(rays[i], final_hit);
+		// If there are any hits scatter.
+		if (hit)
+		{
+			// The new ray.
+			Ray scattered;
+			// Check for scattering.
+			if (scatterRay(rays[i], final_hit, scattered)) { rays[++total_rays] = scattered; }
+		}
+		const bool end = i == total_rays;
+		// Intersection colouring.
+		if (hit)
+		{ colourHit (colour, attenuation, end, final_hit.normal_and_index.xyz,
+			world.elements[uint(final_hit.normal_and_index.w)].material); }
+		// Miss colouring.
+		else
+		{ colourMiss(colour, attenuation, rays[i]); }
+		// No more rays left.
+		if ( end ) { break; }
+	}
+	// Return final colour.
+	return colour;
+}
+
+// Main. ==========================================================================================
+
+// Renders the entire image.
+void main ()
+{
+	// Current image pixel.
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	// Output colour.
+	dvec3 colour = dvec3(0.0);
+	// Launch ANTIALIASING rays per pixel.
+	for (uint aliasing = 0; aliasing < ANTIALIASING; ++aliasing)
+	{
+		// Get ray to pixel.
+		Ray ray = getRay(pixel, aliasing);
+		// Retrieve ray colour.
+		colour += render(ray);
+	}
+	// Final colour.
+	colour /= ANTIALIASING;
+	// Store result colour.
+	imageStore(render_output, pixel, vec4(colour, 1.0));
+}

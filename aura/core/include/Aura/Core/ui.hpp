@@ -18,8 +18,6 @@ namespace Aura::Core
 {
 	// Engine core module.
 	class Nucleus;
-	// Handles GLFW window.
-	class UIWindow;
 	/// <summary>
 	/// Holds the window and all user related inputs and outputs.
 	/// </summary>
@@ -29,8 +27,9 @@ namespace Aura::Core
 		static inline std::string error_message {};
 		// Nucleus handler.
 		Nucleus & core_nucleus;
+		public:
 		// Window handler.
-		UIWindow * window;
+		GLFWwindow * window;
 
 		// ------------------------------------------------------------------ //
 		// Set-up and tear-down.
@@ -69,10 +68,6 @@ namespace Aura::Core
 		// ------------------------------------------------------------------ //
 		public:
 		/// <summary>
-		/// Retrieves the created window, or null pointer in none was created.
-		/// </summary>
-		GLFWwindow * getWindow() noexcept;
-		/// <summary>
 		/// Destroys any existing window and creates a new window according
 		/// given settings. Changes settings window dimensions if new window is
 		/// in full-screen or windowed full-screen. Must be externally sync.
@@ -82,6 +77,25 @@ namespace Aura::Core
 		/// Checks if the window should close.
 		/// </summary>
 		bool shouldWindowClose();
+		private:
+		/// <summary>
+		/// Creates a window according given settings. Changes settings window
+		/// dimensions if in full-screen or windowed full-screen.
+		/// Returns window creation success.
+		/// </summary>
+		bool createWindow(std::string const & window_name) noexcept;
+		/// <summary>
+		/// Destroys any created window and sets the pointer to null.
+		/// </summary>
+		void destroyWindow() noexcept;
+		/// <summary>
+		/// Creates a windowed window.
+		/// </summary>
+		bool createWindowedWindow(std::string const & window_name) noexcept;
+		/// <summary>
+		/// Creates a full-screen window, can be border-less or not.
+		/// </summary>
+		bool createFullScreenWindow(std::string const & window_name) noexcept;
 	};
 }
 

@@ -59,10 +59,8 @@ namespace Aura::Core
 	{
 		// Initializes the vulkan instance with API dump, for easier debugging
 		// Must be set before compilation. Disabled if not in debug mode.
-		static constexpr bool api_dump { true };
-		// Sets program to output generated rays directions in each pixel.
-		// Must only be used with floats.
-		bool ray_gen_test { false };
+		// This is extremely slow.
+		static constexpr bool api_dump { false };
 	};
 
 	/// <summary>

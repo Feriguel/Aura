@@ -17,6 +17,7 @@ namespace Aura::Core
 	/// <summary>
 	/// God of entropy and unpredictability.
 	/// </summary>
+	/// 
 	class RNGesus
 	{
 		// Random number generator, used in number retrieval form the distribution.
