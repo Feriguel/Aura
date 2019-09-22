@@ -5,13 +5,14 @@
 // ========================================================================== //
 #include <Aura/Core/render.hpp>
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 #include <Aura/Core/nucleus.hpp>
 #include "Render/ray-tracer.hpp"
 // Standard includes.
 #include <array>
+#include <cassert>
 #include <cstdint>
+#include <future>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -41,7 +42,6 @@ namespace Aura::Core
 	{
 		initVulkan();
 		queryPhysicalDevices();
-		prepareThreads();
 	}
 	/// <summary>
 	/// Stops rendering and tears-down the core.
@@ -59,50 +59,156 @@ namespace Aura::Core
 	/// </summary>
 	bool Render::renderFrame()
 	{
-		// Acquire frame.
-		bool const has_frame { framework->acquireframe(sem_general_frame, nullptr, 0, current_frame) };
-		if(!has_frame)
-		{ return false; }
-		// Update.
-		auto t1 = core_nucleus.enqueue([&]
+		std::uint32_t frame_idx { 0U };
+
+		// Try to acquire frame.
+		if(!framework->acquireframe(nullptr, main_fence, 0, frame_idx))
 		{
-			framework->updateChainImageSet(current_frame);
-		});
-		auto t2 = core_nucleus.enqueue([&]
+			return false;
+		}
+		// Wait for the frame acquisition.
+		waitForMainFence();
+		// Enqueue environment update jobs and wait for them to finish.
+		updateEnvironment(frame_idx);
+
+		// Update image layout to general to permit render operations.
+		updateImageLayoutToGeneral(frame_idx);
+		// Render image with the updated environment.
+		renderImage();
+		// Update image layout to present to permit its display.
+		updateImageLayoutToPresent(frame_idx);
+
+		// Set image for display.
+		framework->displayFrame(1U, &main_semaphores[2U], frame_idx, present.queue);
+		// Wait for image to render.
+		waitForMainFence();
+		return true;
+	}
+	/// <summary>
+	/// Checks for any updates in the environment and clones the new states
+	/// to the GPU. Given jobs array must be empty. Checks if all jobs are valid.
+	/// </summary>
+	void Render::updateEnvironment(std::uint32_t const & frame_idx) const
+	{
+		std::vector<std::future<void>> jobs {};
+
+		// Update chain image descriptor set.
+		jobs.emplace_back(core_nucleus.enqueue([&] { framework->updateChainImageSet(frame_idx); }));
+		// Update ray launcher with camera changes.
+		jobs.emplace_back(core_nucleus.enqueue([&]
 		{
 			framework->updateRayLauncher(
-				core_nucleus.display_settings.width, core_nucleus.display_settings.height);
-		});
+				core_nucleus.display_settings.ray_depth);
+		}));
 
-		// Record layout transition for frame to general.
-		auto cmd_general = core_nucleus.enqueue([&] { return generalFrame(); });
-		// Generate rays.
-		auto cmd_gen = core_nucleus.enqueue([&] { return rayGen(); });
-		// Record layout transition for frame to present.
-		auto cmd_present = core_nucleus.enqueue([&] { return presentFrame(); });
-		// Submit all work.
-		std::array<vk::SubmitInfo, 3U> submit {
-			cmd_general.get(), cmd_gen.get(),
-			cmd_present.get()
-		};
+		for(std::size_t i { 0U }; i < jobs.size(); ++i)
+		{
+			if(!jobs[i].valid()) { throw std::future_error(std::future_errc::no_state); }
+			jobs[i].wait();
+		}
+	}
+	/// <summary>
+	/// Submits a layout change to general for the frame at the given index.
+	/// This task is submitted without any kind of fence.
+	/// </summary>
+	void Render::updateImageLayoutToGeneral(std::uint32_t const & frame_idx) const
+	{
+		vk::SubmitInfo submit {};
+		recordGeneralTransition(c_buffers[0U], frame_idx, submit);
+		compute.queue.submit(1U, &submit, nullptr, dispatch);
+	}
+	/// <summary>
+	/// Renders all image samples by dispatching a thread for each sample
+	/// command record. This will generate all rays, process them and, at
+	/// the end, schedule a post-process.
+	/// </summary>
+	void Render::renderImage() const
+	{
+		// Check is n_samples is 0
+		std::uint32_t n_samples { core_nucleus.display_settings.anti_aliasing };
+		bool is_random { n_samples != 0U };
+		if(!is_random) { ++n_samples; }
 
-		if(!t1.valid()) { throw std::future_error(std::future_errc::no_state); }
-		if(!t2.valid()) { throw std::future_error(std::future_errc::no_state); }
-		t1.wait();
-		t2.wait();
+		// Resize to fit all submits.
+		// std::uint32_t n_submits { n_samples * WorkTypes::n + 1 };
+		std::uint32_t n_submits { 2U };
+		std::vector<vk::SubmitInfo> submits {};
+		submits.resize(n_submits);
 
-		compute.queue.submit(3U, submit.data(), submit_fence, dispatch);
-		// Set frame to be displayed at the end.
-		if(!framework->displayFrame(1U, &sem_present_frame, current_frame, present.queue))
-		{ throw std::exception("Frame index out of bounds."); }
+		/*
+		// Schedule all sample command recording jobs and fill submits with the results.
+		std::vector<std::future<std::array<vk::SubmitInfo, WorkTypes::n>>> jobs {};
+		jobs.resize(n_samples);
+		for(std::uint32_t i { 0U }; i < n_samples; ++i)
+		{
+			jobs[i] = core_nucleus.enqueue([=] { return recordSample(is_random, i); });
+		}
+		// Record post-process to last job.
+		recordPostProcessStage(c_buffers[1U], 1U,
+			&sample_dispatches[n_samples - 1].c_semaphores[WorkTypes::scatter], submits[n_submits - 1]);
+		// Fill all submit infos with thread results.
+		for(std::size_t i { 0U }; i < static_cast<std::size_t>(n_samples); ++i)
+		{
+			if(!jobs[i].valid()) { throw std::future_error(std::future_errc::no_state); }
+			jobs[i].wait();
+			std::array<vk::SubmitInfo, WorkTypes::n> result { std::move(jobs[i].get()) };
+			for(std::size_t j { 0U }; j < static_cast<std::size_t>(WorkTypes::n); ++j)
+			{
+				submits[i * static_cast<std::size_t>(WorkTypes::n) + j] = result[j];
+			}
+		}
+		*/
 
-		// Wait for completion.
-		vk::Result const result { device.waitForFences(1U, &submit_fence,
-			static_cast<vk::Bool32>(false), std::numeric_limits<std::uint64_t>::max(), dispatch) };
-		if(result != vk::Result::eSuccess)
-		{ vk::throwResultException(result, "waitForFences"); }
-		device.resetFences(1U, &submit_fence, dispatch);
-		return true;
+		RandomOffset randoms {};
+		if(is_random)
+		{
+			randoms.s = randomInCircle();
+			randoms.t = randomInCircle();
+		}
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, c_buffers[1U]);
+		framework->recordRayGen(randoms, c_buffers[1U]);
+		for(std::uint32_t i { 0U }; i < n_samples; ++i)
+		{
+			framework->recordIntersect(c_buffers[1U]);
+			framework->recordIntersect(c_buffers[1U]);
+			framework->recordIntersect(c_buffers[1U]);
+		}
+		framework->recordPostProcess(c_buffers[1U]);
+		endRecord(c_buffers[1U]);
+		submits[0].setWaitSemaphoreCount(1U).setPWaitSemaphores(&main_semaphores[0U]);
+		submits[0].setPWaitDstStageMask(&stage_flags[1U]);
+		submits[0].setCommandBufferCount(1U).setPCommandBuffers(&c_buffers[1U]);
+		submits[0].setSignalSemaphoreCount(1U).setPSignalSemaphores(&main_semaphores[1U]);
+
+		// Submit all jobs.
+		compute.queue.submit(n_submits, submits.data(), nullptr, dispatch);
+	}
+	/// <summary>
+	/// Submits a layout change to present for the frame at the given index.
+	/// This task is submitted with the main fence, which should be waited.
+	/// </summary>
+	void Render::updateImageLayoutToPresent(std::uint32_t const & frame_idx) const
+	{
+		vk::SubmitInfo submit {};
+		recordPresentTransition(c_buffers[2U], frame_idx, submit);
+		compute.queue.submit(1U, &submit, main_fence, dispatch);
+	}
+	/// <summary
+	/// Waits for the main fence until all its tasks are finished.
+	/// </summary>
+	void Render::waitForMainFence() const
+	{
+		vk::Result result { vk::Result::eSuccess };
+		result = device.waitForFences(1U, &main_fence, static_cast<vk::Bool32>(false),
+			std::numeric_limits<std::uint64_t>::max(), dispatch);
+		while(result != vk::Result::eSuccess)
+		{
+			result = device.waitForFences(1U, &main_fence, static_cast<vk::Bool32>(false),
+				std::numeric_limits<std::uint64_t>::max(), dispatch);
+			if(!(result == vk::Result::eSuccess || result == vk::Result::eTimeout))
+			{ vk::throwResultException(result, "Present layout wait."); }
+		}
+		device.resetFences(1U, &main_fence, dispatch);
 	}
 	/// <summary>
 	/// Waits for the device to complete all it's given tasks, must be used
@@ -111,6 +217,19 @@ namespace Aura::Core
 	void Render::waitIdle() const noexcept
 	{
 		device.waitIdle(dispatch);
+	}
+	/// <summary>
+	/// Randomizes a value limited to a circle with 1 unit radius.
+	/// </summary>
+	float Render::randomInCircle() const
+	{
+		float rand = 0;
+		do
+		{
+			rand = core_nucleus.gen();
+		}
+		while(glm::dot(rand, rand) >= 1.0);
+		return rand;
 	}
 
 	// ------------------------------------------------------------------ //
@@ -138,69 +257,150 @@ namespace Aura::Core
 		{ vk::throwResultException(result, "Command::End"); }
 	}
 	/// <summary>
-	/// Changes current frame layout to general. Used before render operations.
-	/// Must only be called by a pool thread.
+	/// Builds a sample submission, and must only be called by a pool thread.
+	/// Returns either a list of submissions or an empty list if the previous
+	/// submission is still on going. In this case the record should enqueued
+	/// again.
 	/// </summary>
-	vk::SubmitInfo const Render::generalFrame() const
+	std::array<vk::SubmitInfo, WorkTypes::n> const Render::recordSample(
+		bool const is_random, std::uint32_t const sample_idx) const
 	{
-		ThreadCommands const & cmd { findThreadId() };
-		vk::CommandBuffer const & buffer { cmd.buff_comp[WorkTypes::general_frame] };
+		SampleDispatch const & sample { sample_dispatches[sample_idx] };
+		std::array<vk::SubmitInfo, WorkTypes::n> submits {};
 
-		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
-		framework->recordChainImageLayoutTransition(current_frame,
-			{}, vk::AccessFlagBits::eShaderWrite,
-			vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
-			compute.family, compute.family,
-			stage_flags[0], stage_flags[1], buffer);
-		endRecord(buffer);
-		return vk::SubmitInfo {
-			1U, &sem_general_frame,
-			&stage_flags[0],
-			1U, &buffer,
-			1U, &sem_general_frame };
+		// Record commands for each of the shader stages.
+		if(sample_idx == 0)
+		{
+			recordRayGenerationStage(sample, 1U, &main_semaphores[0U],
+				is_random, submits[WorkTypes::ray_gen]);
+		}
+		else
+		{
+			recordRayGenerationStage(sample, 1U, &sample_dispatches[sample_idx - 1].c_semaphores[WorkTypes::scatter],
+				is_random, submits[WorkTypes::ray_gen]);
+		}
+		recordIntersectStage(sample, submits[WorkTypes::intersect]);
+		recordColourStage(sample, submits[WorkTypes::colour]);
+		recordScatterStage(sample, submits[WorkTypes::scatter]);
+		return submits;
 	}
 	/// <summary>
-	/// Changes current frame layout to present. Used before after showing frame.
-	/// Must only be called by a pool thread.
+	/// Records the ray generation command buffer and the builds the submit
+	/// info according to the to conditions given. Upon completion signals
+	/// the thread corresponding work semaphore.
 	/// </summary>
-	vk::SubmitInfo const Render::presentFrame() const
+	void Render::recordRayGenerationStage(SampleDispatch const & sample, std::uint32_t const n_wait,
+		vk::Semaphore const * p_wait, bool const & is_random, vk::SubmitInfo & submit) const
 	{
-		ThreadCommands const & cmd { findThreadId() };
-		vk::CommandBuffer const & buffer { cmd.buff_comp[WorkTypes::present_frame] };
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, sample.c_buffers[WorkTypes::ray_gen]);
+		RandomOffset randoms {};
+		if(is_random)
+		{
+			randoms.s = randomInCircle();
+			randoms.t = randomInCircle();
+		}
+		framework->recordRayGen(randoms, sample.c_buffers[WorkTypes::ray_gen]);
+		endRecord(sample.c_buffers[WorkTypes::ray_gen]);
 
-		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
-		framework->recordChainImageLayoutTransition(current_frame,
-			vk::AccessFlagBits::eShaderWrite, {},
-			vk::ImageLayout::eGeneral, vk::ImageLayout::ePresentSrcKHR,
-			compute.family, present.family,
-			stage_flags[1], stage_flags[3], buffer);
-		endRecord(buffer);
-		return vk::SubmitInfo {
-			1U, &sem_general_frame,
-			&stage_flags[1],
-			1U, &buffer,
-			1U, &sem_present_frame };
+		submit.setWaitSemaphoreCount(n_wait).setPWaitSemaphores(p_wait);
+		submit.setPWaitDstStageMask(&stage_flags[1U]);
+		submit.setCommandBufferCount(1U).setPCommandBuffers(&sample.c_buffers[WorkTypes::ray_gen]);
+		submit.setSignalSemaphoreCount(1U).setPSignalSemaphores(&sample.c_semaphores[WorkTypes::ray_gen]);
 	}
 	/// <summary>
-	/// Changes current frame layout to general. Used before render operations.
-	/// Must only be called by a pool thread.
+	/// Records the intersect stage command buffer and the builds the submit
+	/// info. Upon completion signals the thread corresponding work semaphore.
 	/// </summary>
-	vk::SubmitInfo const Render::rayGen() const
+	void Render::recordIntersectStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const
 	{
-		ThreadCommands const & cmd { findThreadId() };
-		vk::CommandBuffer const & buffer { cmd.buff_comp[WorkTypes::raygen] };
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, sample.c_buffers[WorkTypes::intersect]);
+		framework->recordIntersect(sample.c_buffers[WorkTypes::intersect]);
+		endRecord(sample.c_buffers[WorkTypes::intersect]);
 
+		submit.setWaitSemaphoreCount(1U).setPWaitSemaphores(&sample.c_semaphores[WorkTypes::ray_gen]);
+		submit.setPWaitDstStageMask(&stage_flags[1U]);
+		submit.setCommandBufferCount(1U).setPCommandBuffers(&sample.c_buffers[WorkTypes::intersect]);
+		submit.setSignalSemaphoreCount(1U).setPSignalSemaphores(&sample.c_semaphores[WorkTypes::intersect]);
+	}
+	/// <summary>
+	/// Records the colour stage command buffer and the builds the submit
+	/// info. Upon completion signals the thread corresponding work semaphore.
+	/// </summary>
+	void Render::recordColourStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const
+	{
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, sample.c_buffers[WorkTypes::colour]);
+		framework->recordIntersect(sample.c_buffers[WorkTypes::colour]);
+		endRecord(sample.c_buffers[WorkTypes::colour]);
+
+		submit.setWaitSemaphoreCount(1U).setPWaitSemaphores(&sample.c_semaphores[WorkTypes::intersect]);
+		submit.setPWaitDstStageMask(&stage_flags[1U]);
+		submit.setCommandBufferCount(1U).setPCommandBuffers(&sample.c_buffers[WorkTypes::colour]);
+		submit.setSignalSemaphoreCount(1U).setPSignalSemaphores(&sample.c_semaphores[WorkTypes::colour]);
+	}
+	/// <summary>
+	/// Records the scatter stage command buffer and the builds the submit
+	/// info. Upon completion signals the thread corresponding work semaphore.
+	/// </summary>
+	void Render::recordScatterStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const
+	{
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, sample.c_buffers[WorkTypes::scatter]);
+		framework->recordIntersect(sample.c_buffers[WorkTypes::scatter]);
+		endRecord(sample.c_buffers[WorkTypes::scatter]);
+
+		submit.setWaitSemaphoreCount(1U).setPWaitSemaphores(&sample.c_semaphores[WorkTypes::colour]);
+		submit.setPWaitDstStageMask(&stage_flags[1U]);
+		submit.setCommandBufferCount(1U).setPCommandBuffers(&sample.c_buffers[WorkTypes::scatter]);
+		submit.setSignalSemaphoreCount(1U).setPSignalSemaphores(&sample.c_semaphores[WorkTypes::scatter]);
+	}
+	/// <summary>
+	/// Records the post-process command buffer and the builds the submit
+	/// info. This task signal semaphore is the second main semaphore.
+	/// </summary>
+	void Render::recordPostProcessStage(vk::CommandBuffer const & buffer,
+		std::uint32_t const n_wait, vk::Semaphore const * p_wait, vk::SubmitInfo & submit) const
+	{
 		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
-		RandomOffset randoms { core_nucleus.gen(), core_nucleus.gen() };
-		framework->recordRayGen(core_nucleus.display_settings.width, core_nucleus.display_settings.height,
-			randoms, buffer);
+		framework->recordIntersect(buffer);
 		endRecord(buffer);
 
-		return vk::SubmitInfo {
-			1U, &sem_general_frame,
-			&stage_flags[1],
-			1U, &buffer,
-			1U, &sem_general_frame };
+		submit.setWaitSemaphoreCount(n_wait).setPWaitSemaphores(p_wait);
+		submit.setPWaitDstStageMask(&stage_flags[1U]);
+		submit.setCommandBufferCount(1U).setPCommandBuffers(&buffer);
+		submit.setSignalSemaphoreCount(1U).setPSignalSemaphores(&main_semaphores[1U]);
+	}
+	/// <summary>
+	/// Records layout transition of the frame at the given index to general.
+	/// </summary>
+	void Render::recordGeneralTransition(vk::CommandBuffer const & buffer,
+		std::uint32_t const frame_idx, vk::SubmitInfo & submit) const
+	{
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
+		framework->recordChainImageLayoutTransition(frame_idx,
+			{}, vk::AccessFlagBits::eShaderWrite, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
+			compute.family, compute.family, stage_flags[0], stage_flags[1], buffer);
+		endRecord(buffer);
+
+		submit.setWaitSemaphoreCount(0U).setPWaitSemaphores(nullptr);
+		submit.setPWaitDstStageMask(&stage_flags[0U]);
+		submit.setCommandBufferCount(1U).setPCommandBuffers(&buffer);
+		submit.setSignalSemaphoreCount(1U).setPSignalSemaphores(&main_semaphores[0U]);
+	}
+	/// <summary>
+	/// Records layout transition of the frame at the given index to present.
+	/// </summary>
+	void Render::recordPresentTransition(vk::CommandBuffer const & buffer,
+		std::uint32_t const frame_idx, vk::SubmitInfo & submit) const
+	{
+		beginRecord(vk::CommandBufferUsageFlagBits::eOneTimeSubmit, {}, buffer);
+		framework->recordChainImageLayoutTransition(frame_idx,
+			vk::AccessFlagBits::eShaderWrite, {}, vk::ImageLayout::eGeneral, vk::ImageLayout::ePresentSrcKHR,
+			compute.family, present.family, stage_flags[1], stage_flags[3], buffer);
+		endRecord(buffer);
+
+		submit.setWaitSemaphoreCount(1U).setPWaitSemaphores(&main_semaphores[1U]);
+		submit.setPWaitDstStageMask(&stage_flags[1U]);
+		submit.setCommandBufferCount(1U).setPCommandBuffers(&buffer);
+		submit.setSignalSemaphoreCount(1U).setPSignalSemaphores(&main_semaphores[2U]);
 	}
 
 	// ------------------------------------------------------------------ //
@@ -291,7 +491,10 @@ namespace Aura::Core
 	/// </summary>
 	void Render::terminateVulkan() noexcept
 	{
-		instance.destroyDebugUtilsMessengerEXT(debug_messeger, nullptr, dispatch);
+		if constexpr(debug_mode)
+		{
+			instance.destroyDebugUtilsMessengerEXT(debug_messeger, nullptr, dispatch);
+		}
 		instance.destroy(nullptr, dispatch);
 	}
 	/// <summary>
@@ -482,21 +685,16 @@ namespace Aura::Core
 
 		framework = new RayTracer(dispatch, instance, physical_device, device,
 			surface, base_extent, compute.family, transfer.family, present.family,
-			static_cast<ThreadPool &>(core_nucleus), core_nucleus.environment.guard,
-			core_nucleus.environment.scene);
+			static_cast<ThreadPool &>(core_nucleus),
+			core_nucleus.display_settings.width, core_nucleus.display_settings.height,
+			core_nucleus.environment.guard, core_nucleus.environment.scene);
 
-		for(size_t i = 0; i < thread_commands.size(); i++)
-		{
-			createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
-				compute.family, thread_commands[i].pool_comp);
-			allocCommandBuffers(thread_commands[i].pool_comp,
-				vk::CommandBufferLevel::ePrimary,
-				WorkTypes::n, thread_commands[i].buff_comp.data());
-		}
-
-		createSemaphore({}, sem_general_frame);
-		createSemaphore({}, sem_present_frame);
-		createFence({}, submit_fence);
+		createSemaphore({}, main_semaphores[0U]);
+		createSemaphore({}, main_semaphores[1U]);
+		createSemaphore({}, main_semaphores[2U]);
+		createFence({}, main_fence);
+		createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, compute.family, c_pool);
+		allocCommandBuffers(c_pool, vk::CommandBufferLevel::ePrimary, 3U, c_buffers.data());
 	}
 	/// <summary>
 	/// Destroys the framework created on the selected device. Must be used
@@ -504,18 +702,57 @@ namespace Aura::Core
 	/// </summary>
 	void Render::destroyFramework() noexcept
 	{
-		destroyFence(submit_fence);
-		destroySemaphore(sem_present_frame);
-		destroySemaphore(sem_general_frame);
-
-		for(size_t i = 0; i < thread_commands.size(); i++)
-		{
-			freeCommandBuffers(thread_commands[i].pool_comp,
-				WorkTypes::n, thread_commands[i].buff_comp.data());
-			destroyCommandPool(thread_commands[i].pool_comp);
-		}
-
+		freeCommandBuffers(c_pool, 3U, c_buffers.data());
+		destroyCommandPool(c_pool);
+		destroyFence(main_fence);
+		destroySemaphore(main_semaphores[2U]);
+		destroySemaphore(main_semaphores[1U]);
+		destroySemaphore(main_semaphores[0U]);
 		delete framework;
+	}
+	/// <summary>
+	/// Builds the entire render synchronisation.
+	/// Throws any error that might occur.
+	/// </summary>
+	void Render::setUpDispatch()
+	{
+		std::size_t n_samples { core_nucleus.display_settings.anti_aliasing };
+		if(n_samples == 0) { ++n_samples; }
+		sample_dispatches.resize(n_samples);
+		for(std::size_t s_idx { 0U }; s_idx < n_samples; ++s_idx)
+		{
+			SampleDispatch & sample = sample_dispatches[s_idx];
+			// Create compute command pool and allocate buffers.
+			createCommandPool(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, compute.family, sample.c_pool);
+			allocCommandBuffers(sample.c_pool, vk::CommandBufferLevel::ePrimary,
+				WorkTypes::n, sample.c_buffers.data());
+			// Create compute semaphores and fence.
+			for(std::uint32_t i { 0U }; i < WorkTypes::n; ++i)
+			{
+				createSemaphore({}, sample.c_semaphores[i]);
+			}
+		}
+	}
+	/// <summary>
+	/// Destroys the synchronisation created on the selected device. Must be
+	/// used before re-selecting a new device.
+	/// </summary>
+	void Render::tearDownDispatch() noexcept
+	{
+		std::size_t n_samples { core_nucleus.display_settings.anti_aliasing };
+		if(n_samples == 0) { ++n_samples; }
+		for(std::size_t s_idx { 0U }; s_idx < n_samples; ++s_idx)
+		{
+			SampleDispatch & sample = sample_dispatches[s_idx];
+			// Destroy compute fence and semaphores.
+			for(std::uint32_t i { 0U }; i < WorkTypes::n; ++i)
+			{
+				destroySemaphore(sample.c_semaphores[i]);
+			}
+			// Free compute command buffers and destroy pool.
+			freeCommandBuffers(sample.c_pool, WorkTypes::n, sample.c_buffers.data());
+			destroyCommandPool(sample.c_pool);
+		}
 	}
 
 	// ------------------------------------------------------------------ //
@@ -599,33 +836,6 @@ namespace Aura::Core
 	// ------------------------------------------------------------------ //
 	// Helpers.
 	// ------------------------------------------------------------------ //
-	/// <summary>
-	/// Associates each thread to a thread command structure for exclusive
-	/// use of pools.
-	/// </summary>
-	void Render::prepareThreads() noexcept
-	{
-		std::vector<std::thread::id> indices {};
-		core_nucleus.threadIndices(indices);
-		thread_commands.resize(indices.size());
-		for(size_t i = 0; i < indices.size(); i++)
-		{
-			thread_commands[i].id = std::move(indices[i]);
-		}
-	}
-	/// <summary>
-	/// Searches for thread id in thread command structures and returns its
-	/// reference.
-	/// </summary>
-	ThreadCommands const & Render::findThreadId() const
-	{
-		for(size_t i = 0; i < thread_commands.size(); i++)
-		{
-			if(thread_commands[i].id == std::this_thread::get_id())
-			{ return thread_commands[i]; }
-		}
-		throw std::exception("Could not find thread id in thread commands.");
-	}
 	/// <summary>
 	/// Finds a queue family with the given type flags. Returns if one is found
 	/// and updates the given family index with found queue index.
@@ -719,12 +929,10 @@ namespace Aura::Core
 		vk::PhysicalDeviceFeatures & required, bool const check) const
 	{
 		required = {};
-		if constexpr(gpu_double) { required.shaderFloat64 = true; }
 		if(check)
 		{
 			vk::PhysicalDeviceFeatures features;
 			physical_device.getFeatures(&features, dispatch);
-			if(!features.shaderFloat64) { return false; }
 		}
 		return true;
 	}

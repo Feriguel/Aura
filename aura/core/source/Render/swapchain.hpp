@@ -7,10 +7,10 @@
 #ifndef AURACORE_RENDER_SWAPCHAIN
 #define AURACORE_RENDER_SWAPCHAIN
 // Internal includes.
-#include <Aura/Core/types.hpp>
-#include <Aura/Core/settings.hpp>
 #include "framework.hpp"
 // Standard includes.
+#include <cstdint>
+#include <vector>
 // External includes.
 #pragma warning(disable : 26495)
 #define VK_NO_PROTOTYPES
@@ -21,14 +21,36 @@
 
 namespace Aura::Core
 {
+	/// <summary>
+	/// Structure containing all the layout and set of a chain image.
+	/// </summary>
+	struct ChainResource
+	{
+		// Resource descriptor set layout.
+		vk::DescriptorSetLayout set_layout {};
+		// Resource descriptor set handles.
+		vk::DescriptorSet set {};
+	};
+	/// <summary>
+	/// Swap-chain initialisation defaults and storage of the actual created swap-chain state.
+	/// </summary>
 	struct SwapChainInfo
 	{
+		// Presentation mode of chain images.
 		vk::PresentModeKHR present_mode { vk::PresentModeKHR::eMailbox };
+		// Format and colour space of swap-chain images.
 		vk::SurfaceFormatKHR surface_format { vk::Format::eR8G8B8A8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear };
+		// Default usage flags of swap-chain images.
 		vk::ImageUsageFlags usage_flags { vk::ImageUsageFlagBits::eStorage };
+		// Composite alpha.
 		vk::CompositeAlphaFlagBitsKHR alpha_mode { vk::CompositeAlphaFlagBitsKHR::eOpaque };
+		// Image component mapping order.
 		vk::ComponentMapping mapping {};
 	};
+	/// <summary>
+	/// Extension to the framework which creates an swap-chain and all requirements for its use.
+	/// Comes with a single pre-initialised descriptor, if not explicitly disabled. These ain't allocated.
+	/// </summary>
 	class VulkanSwapchain : public VulkanFramework
 	{
 		protected:
@@ -44,6 +66,8 @@ namespace Aura::Core
 		std::vector<vk::Image> chain_images;
 		// Vulkan swap-chain image views.
 		std::vector<vk::ImageView> chain_views;
+		// Chain images.
+		ChainResource chain_image;
 
 		// ------------------------------------------------------------------ //
 		// Set-up and tear-down.
@@ -56,7 +80,7 @@ namespace Aura::Core
 			vk::DispatchLoaderDynamic const & dispatch, vk::Instance const & instance,
 			vk::PhysicalDevice const & physical_device, vk::Device const & device,
 			vk::SurfaceKHR const & surface, vk::Extent2D const & base_extent,
-			std::vector<std::uint32_t> accessing_families) :
+			std::vector<std::uint32_t> accessing_families, bool const descriptor = true) :
 			VulkanFramework(dispatch, instance, physical_device, device),
 			surface(surface), extent(base_extent)
 		{
@@ -66,12 +90,17 @@ namespace Aura::Core
 
 			createSwapChain(accessing_families);
 			createChainImageViews();
+			if(descriptor)
+			{
+				setUpChainImage();
+			}
 		}
 		/// <summary>
 		/// Tears-down both swap-chain and swap-chain image views.
 		/// </summary>
 		virtual ~VulkanSwapchain() noexcept
 		{
+			tearDownChainImage();
 			destroyChainImageViews();
 			destroySwapChain();
 		}
@@ -101,18 +130,17 @@ namespace Aura::Core
 		/// Must only be used by the main thread.
 		/// Throws any error that might occur.
 		/// </summary>
-		bool displayFrame(std::uint32_t const & n_semaphores, vk::Semaphore const * const p_semaphores,
+		void displayFrame(std::uint32_t const & n_semaphores, vk::Semaphore const * const p_semaphores,
 			std::uint32_t const & frame_index, vk::Queue const & queue) const
 		{
 			if(frame_index >= static_cast<std::uint32_t>(chain_views.size()))
-			{ return false; }
+			{ throw std::exception("Frame index out of bounds."); }
 			vk::PresentInfoKHR const present_info { n_semaphores, p_semaphores,
 				1U, &chain, &frame_index, nullptr };
 			vk::Result const result { queue.presentKHR(
 				&present_info, dispatch) };
 			if(result != vk::Result::eSuccess)
 			{ vk::throwResultException(result, "presentKHR"); }
-			return true;
 		}
 		/// <summary>
 		/// Records a pipeline barrier with a chain image layout transition.
@@ -139,6 +167,49 @@ namespace Aura::Core
 		}
 
 		// ------------------------------------------------------------------ //
+		// Resources.
+		// ------------------------------------------------------------------ //
+		private:
+		/// <summary>
+		/// Prepares chain image layout.
+		/// </summary>
+		void setUpChainImage()
+		{
+			std::array<vk::DescriptorSetLayoutBinding, 1U> const binds {
+				// - Binding number, descriptor type and count.
+				// - Shader stage and sampler.
+				vk::DescriptorSetLayoutBinding { 0U, vk::DescriptorType::eStorageImage, 1U,
+					vk::ShaderStageFlagBits::eCompute, nullptr } };
+			createDescriptorSetLayout({}, 1U, binds.data(), chain_image.set_layout);
+		}
+		public:
+		/// <summary>
+		/// Updates chain image according to the frame index.
+		/// </summary>
+		void updateChainImageSet(std::uint32_t frame_index)
+		{
+			std::array<vk::DescriptorImageInfo, 1U> const images {
+				// - Sampler, view, layout.
+				vk::DescriptorImageInfo {nullptr, chain_views[frame_index], vk::ImageLayout::eGeneral}
+			};
+			std::array<vk::WriteDescriptorSet, 1U> const writes {
+				// - Destination set, binding and array element, count.
+				// - Type and info(Image, Buffer, Texel).
+				vk::WriteDescriptorSet{chain_image.set, 0U, 0U, 1U,
+					vk::DescriptorType::eStorageImage, &images[0U], nullptr, nullptr}
+			};
+			device.updateDescriptorSets(1U, writes.data(), 0U, nullptr, dispatch);
+		}
+		private:
+		/// <summary>
+		/// Destroys chain image layout.
+		/// </summary>
+		void tearDownChainImage()
+		{
+			destroyDescriptorSetLayout(chain_image.set_layout);
+		}
+
+		// ------------------------------------------------------------------ //
 		// Swap-chain and images.
 		// ------------------------------------------------------------------ //
 		private:
@@ -159,7 +230,7 @@ namespace Aura::Core
 			std::uint32_t n_images { 0U };
 			selectMinimumChainImages(surface_capabilities, n_images);
 
-			if(accessing_families.size() == 1)
+			if(accessing_families.size() == 1U)
 			{
 				vk::SwapchainCreateInfoKHR const create_info { {}, surface,
 					n_images, info.surface_format.format, info.surface_format.colorSpace,
@@ -254,7 +325,7 @@ namespace Aura::Core
 					formats[i].colorSpace == info.surface_format.colorSpace };
 				if(has_format && has_colour) { return; }
 			}
-			info.surface_format = formats[0];
+			info.surface_format = formats[0U];
 		}
 		/// <summary>
 		/// Ensures present mode is available by verifying its availability and
@@ -280,7 +351,7 @@ namespace Aura::Core
 			{
 				if(modes[i] == info.present_mode) { return; }
 			}
-			info.present_mode = modes[0];
+			info.present_mode = modes[0U];
 		}
 		/// <summary>
 		/// Ensures the best extent possible.
@@ -305,8 +376,8 @@ namespace Aura::Core
 		void selectMinimumChainImages(vk::SurfaceCapabilitiesKHR const & capabilities,
 			std::uint32_t & minimum_images) const noexcept
 		{
-			minimum_images = capabilities.minImageCount + 1;
-			if(capabilities.maxImageCount > 0)
+			minimum_images = capabilities.minImageCount + 1U;
+			if(capabilities.maxImageCount > 0U)
 			{
 				if(minimum_images > capabilities.maxImageCount)
 				{ minimum_images = capabilities.maxImageCount; }

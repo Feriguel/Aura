@@ -7,11 +7,11 @@
 #ifndef AURACORE_RENDER
 #define AURACORE_RENDER
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 // Standard includes.
 #include <array>
 #include <cstdint>
+#include <future>
 #include <thread>
 #include <vector>
 // External includes.
@@ -41,22 +41,23 @@ namespace Aura::Core
 	/// </summary>
 	struct WorkTypes
 	{
-		static constexpr std::uint32_t n = 3U;
-		static constexpr std::uint32_t general_frame = 0U;
-		static constexpr std::uint32_t present_frame = 1U;
-		static constexpr std::uint32_t raygen = 2U;
+		static constexpr std::uint32_t n { 4U };
+		static constexpr std::uint32_t ray_gen { 0U };
+		static constexpr std::uint32_t intersect { 1U };
+		static constexpr std::uint32_t colour { 2U };
+		static constexpr std::uint32_t scatter { 3U };
 	};
 	/// <summary>
-	/// Englobes the queue and its respective family index.
+	/// Joins all necessary elements required for a single thread to build dispatch.
 	/// </summary>
-	struct ThreadCommands
+	struct SampleDispatch
 	{
-		// Associated thread id.
-		std::thread::id id;
-		// Vulkan main command pool.
-		vk::CommandPool pool_comp;
-		// Vulkan thread buffer list.
-		std::array<vk::CommandBuffer, WorkTypes::n> buff_comp;
+		// Thread compute command pool.
+		vk::CommandPool c_pool {};
+		// Thread compute command buffers.
+		std::array<vk::CommandBuffer, WorkTypes::n> c_buffers {};
+		// Thread compute command semaphores.
+		std::array<vk::Semaphore, WorkTypes::n> c_semaphores {};
 	};
 	/// <summary>
 	/// Program render and render cycle. Uses a vulkan compute ray tracer as a
@@ -86,19 +87,18 @@ namespace Aura::Core
 		// Vulkan compute ray tracing framework.
 		RayTracer * framework;
 
-		// Thread command structures for each thread.
-		std::vector<ThreadCommands> thread_commands;
 		// Permanent shader flags.
 		std::array<vk::PipelineStageFlags, 4> const stage_flags;
-		// Vulkan semaphore, used to transition layout to general.
-		vk::Semaphore sem_general_frame;
-		// Vulkan semaphore, used to transition layout to present.
-		vk::Semaphore sem_present_frame;
-		// Vulkan fence, used to wait for submission obtaining another.
-		vk::Fence submit_fence;
-
-		// In render frames.
-		std::uint32_t current_frame;
+		// Dispatch structures for each thread.
+		std::vector<SampleDispatch> sample_dispatches;
+		// Render thread compute command pool.
+		vk::CommandPool c_pool;
+		// Main tasks compute command buffer.
+		std::array<vk::CommandBuffer, 3U> c_buffers;
+		// Main tasks semaphores.
+		std::array<vk::Semaphore, 3U> main_semaphores;
+		// Render fence.
+		vk::Fence main_fence;
 
 		// ------------------------------------------------------------------ //
 		// Set-up and tear-down.
@@ -122,10 +122,39 @@ namespace Aura::Core
 		/// </summary>
 		bool renderFrame();
 		/// <summary>
+		/// Checks for any updates in the environment and clones the new states
+		/// to the GPU. Given jobs array must be empty. Checks if all jobs are valid.
+		/// </summary>
+		void updateEnvironment(std::uint32_t const & frame_idx) const;
+		/// <summary>
+		/// Submits a layout change to general for the frame at the given index.
+		/// This task is submitted without any kind of fence.
+		/// </summary>
+		void updateImageLayoutToGeneral(std::uint32_t const & frame_idx) const;
+		/// <summary>
+		/// Renders all image samples by dispatching a thread for each sample
+		/// command record. This will generate all rays, process them and, at
+		/// the end, schedule a post-process.
+		/// </summary>
+		void renderImage() const;
+		/// <summary>
+		/// Submits a layout change to present for the frame at the given index.
+		/// This task is submitted with the main fence, which should be waited.
+		/// </summary>
+		void updateImageLayoutToPresent(std::uint32_t const & frame_idx) const;
+		/// <summary
+		/// Waits for the main fence until all its tasks are finished.
+		/// </summary>
+		void waitForMainFence() const;
+		/// <summary
 		/// Waits for the device to complete all it's given tasks, must be used
 		/// before destroying any of the tear-down functions.
 		/// </summary>
 		void waitIdle() const noexcept;
+		/// <summary>
+		/// Randomizes a value limited to a circle with 1 unit radius.
+		/// </summary>
+		float randomInCircle() const;
 
 		// ------------------------------------------------------------------ //
 		// Command creation.
@@ -141,20 +170,50 @@ namespace Aura::Core
 		/// </summary>
 		void endRecord(vk::CommandBuffer const & command) const;
 		/// <summary>
-		/// Changes current frame layout to general.
-		/// Used before render operations.
+		/// Builds a sample submission, and must only be called by a pool thread.
+		/// Returns either a list of submissions or an empty list if the previous
+		/// submission is still on going. In this case the record should enqueued
+		/// again.
 		/// </summary>
-		vk::SubmitInfo const generalFrame() const;
+		std::array<vk::SubmitInfo, WorkTypes::n> const recordSample(bool const is_random, std::uint32_t const sample_idx) const;
 		/// <summary>
-		/// Changes current frame layout to present.
-		/// Used before showing frame.
+		/// Records the ray generation command buffer and the builds the submit
+		/// info according to the to conditions given. Upon completion signals
+		/// the thread corresponding work semaphore.
 		/// </summary>
-		vk::SubmitInfo const presentFrame() const;
+		void recordRayGenerationStage(SampleDispatch const & sample, std::uint32_t const n_wait,
+			vk::Semaphore const * p_wait, bool const & is_random, vk::SubmitInfo & submit) const;
 		/// <summary>
-		/// Generates a set of rays, one for each pixel, according to scene camera.
-		/// Used before intersections.
+		/// Records the intersect stage command buffer and the builds the submit
+		/// info. Upon completion signals the thread corresponding work semaphore.
 		/// </summary>
-		vk::SubmitInfo const rayGen() const;
+		void recordIntersectStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const;
+		/// <summary>
+		/// Records the colour stage command buffer and the builds the submit
+		/// info. Upon completion signals the thread corresponding work semaphore.
+		/// </summary>
+		void recordColourStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const;
+		/// <summary>
+		/// Records the scatter stage command buffer and the builds the submit
+		/// info. Upon completion signals the thread corresponding work semaphore.
+		/// </summary>
+		void recordScatterStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const;
+		/// <summary>
+		/// Records the post-process command buffer and the builds the submit
+		/// info. This task signal semaphore is the second main semaphore.
+		/// </summary>
+		void recordPostProcessStage(vk::CommandBuffer const & buffer,
+			std::uint32_t const n_wait, vk::Semaphore const * p_wait, vk::SubmitInfo & submit) const;
+		/// <summary>
+		/// Records layout transition of the frame at the given index to general.
+		/// </summary>
+		void recordGeneralTransition(vk::CommandBuffer const & buffer,
+			std::uint32_t const frame_idx, vk::SubmitInfo & submit) const;
+		/// <summary>
+		/// Records layout transition of the frame at the given index to present.
+		/// </summary>
+		void recordPresentTransition(vk::CommandBuffer const & buffer,
+			std::uint32_t const frame_idx, vk::SubmitInfo & submit) const;
 
 		// ------------------------------------------------------------------ //
 		// Vulkan set-up and tear-down related.
@@ -244,6 +303,16 @@ namespace Aura::Core
 		/// before re-selecting a new device.
 		/// </summary>
 		void destroyFramework() noexcept;
+		/// <summary>
+		/// Builds the entire render synchronisation.
+		/// Throws any error that might occur.
+		/// </summary>
+		void setUpDispatch();
+		/// <summary>
+		/// Destroys the synchronisation created on the selected device. Must be
+		/// used before re-selecting a new device.
+		/// </summary>
+		void tearDownDispatch() noexcept;
 
 		// ------------------------------------------------------------------ //
 		// Vulkan device selection.
@@ -271,16 +340,6 @@ namespace Aura::Core
 		// Vulkan related helpers.
 		// ------------------------------------------------------------------ //
 		private:
-		/// <summary>
-		/// Associates each thread to a thread command structure for exclusive
-		/// use of pools.
-		/// </summary>
-		void prepareThreads() noexcept;
-		/// <summary>
-		/// Searches for thread id in thread command structures and returns its
-		/// reference.
-		/// </summary>
-		ThreadCommands const & findThreadId() const;
 		/// <summary>
 		/// Finds a queue family with the given type flags. Returns if one is found
 		/// and updates the given family index with found queue index.

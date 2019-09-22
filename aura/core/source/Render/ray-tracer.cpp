@@ -5,7 +5,6 @@
 // ========================================================================== //
 #include "ray-tracer.hpp"
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 #include <Aura/Core/Environment/structures.hpp>
 #include <Aura/Core/Render/structures.hpp>
@@ -40,9 +39,11 @@ namespace Aura::Core
 		vk::SurfaceKHR const & surface, vk::Extent2D const & chain_base_extent,
 		std::uint32_t const compute_family, std::uint32_t const transfer_family,
 		std::uint32_t const present_family, ThreadPool & thread_pool,
+		std::uint32_t const & width, std::uint32_t const & height,
 		std::shared_mutex & scene_guard, Scene * const & scene) :
 		VulkanSwapchain(dispatch, instance, physical_device, device,
 			surface, chain_base_extent, std::vector<std::uint32_t>{compute_family, present_family}),
+		width(width), height(height),
 		scene_guard(scene_guard), scene(scene),
 		compute_family(compute_family), transfer_family(transfer_family)
 	{
@@ -63,18 +64,69 @@ namespace Aura::Core
 	/// <summary>
 	/// Records a ray gen operation.
 	/// </summary>
-	void RayTracer::recordRayGen(std::uint32_t const & width, std::uint32_t const & height,
-		RandomOffset & push, vk::CommandBuffer const & command) const
+	void RayTracer::recordRayGen(RandomOffset & push, vk::CommandBuffer const & command) const
 	{
 		vk::PipelineBindPoint bind_point { vk::PipelineBindPoint::eCompute };
 		command.bindPipeline(bind_point, gen.pipeline, dispatch);
-		std::array<vk::DescriptorSet, 2> sets { ray_launcher.set, chain_image.set };
+		std::array<vk::DescriptorSet, 3U> sets { ray_launcher.set, rays_and_hits.set, pixels_state.set };
 		command.bindDescriptorSets(bind_point, gen.layout, 0U,
-			2U, sets.data(), 0U, nullptr, dispatch);
+			3U, sets.data(), 0U, nullptr, dispatch);
 		command.pushConstants(gen.layout, vk::ShaderStageFlagBits::eCompute,
 			0U, sizeof(RandomOffset), reinterpret_cast<void *>(&push), dispatch);
-		command.dispatch(width / raygen_gsize[0], height / raygen_gsize[1],
-			raygen_gsize[2], dispatch);
+		command.dispatch(width / group_size[0U], height / group_size[1U],
+			group_size[2U], dispatch);
+	}
+	/// <summary>
+	/// Records a intersect operation.
+	/// </summary>
+	void RayTracer::recordIntersect(vk::CommandBuffer const & command) const
+	{
+		vk::PipelineBindPoint bind_point { vk::PipelineBindPoint::eCompute };
+		command.bindPipeline(bind_point, intersect.pipeline, dispatch);
+		std::array<vk::DescriptorSet, 1U> sets { rays_and_hits.set };
+		command.bindDescriptorSets(bind_point, intersect.layout, 0U,
+			1U, sets.data(), 0U, nullptr, dispatch);
+		command.dispatch(width / group_size[0U], height / group_size[1U],
+			group_size[2U], dispatch);
+	}
+	/// <summary>
+	/// Records a absorption and colouring operation.
+	/// </summary>
+	void RayTracer::recordColour(vk::CommandBuffer const & command) const
+	{
+		vk::PipelineBindPoint bind_point { vk::PipelineBindPoint::eCompute };
+		command.bindPipeline(bind_point, colour.pipeline, dispatch);
+		std::array<vk::DescriptorSet, 2U> sets { rays_and_hits.set, pixels_state.set };
+		command.bindDescriptorSets(bind_point, colour.layout, 0U,
+			2U, sets.data(), 0U, nullptr, dispatch);
+		command.dispatch(width / group_size[0U], height / group_size[1U],
+			group_size[2U], dispatch);
+	}
+	/// <summary>
+	/// Records a scatter operation.
+	/// </summary>
+	void RayTracer::recordScatter(vk::CommandBuffer const & command) const
+	{
+		vk::PipelineBindPoint bind_point { vk::PipelineBindPoint::eCompute };
+		command.bindPipeline(bind_point, scatter.pipeline, dispatch);
+		std::array<vk::DescriptorSet, 1U> sets { rays_and_hits.set };
+		command.bindDescriptorSets(bind_point, scatter.layout, 0U,
+			1U, sets.data(), 0U, nullptr, dispatch);
+		command.dispatch(width / group_size[0U], height / group_size[1U],
+			group_size[2U], dispatch);
+	}
+	/// <summary>
+	/// Records a post-processing operation.
+	/// </summary>
+	void RayTracer::recordPostProcess(vk::CommandBuffer const & command) const
+	{
+		vk::PipelineBindPoint bind_point { vk::PipelineBindPoint::eCompute };
+		command.bindPipeline(bind_point, post_process.pipeline, dispatch);
+		std::array<vk::DescriptorSet, 2U> sets { pixels_state.set, chain_image.set };
+		command.bindDescriptorSets(bind_point, post_process.layout, 0U,
+			2U, sets.data(), 0U, nullptr, dispatch);
+		command.dispatch(width / group_size[0U], height / group_size[1U],
+			group_size[2U], dispatch);
 	}
 
 	// ------------------------------------------------------------------ //
@@ -83,7 +135,7 @@ namespace Aura::Core
 	/// <summary>
 	/// Updates the ray launcher using the camera in the scene.
 	/// </summary>
-	void RayTracer::updateRayLauncher(std::uint32_t const & width, std::uint32_t const & height)
+	void RayTracer::updateRayLauncher(std::uint32_t const ray_depth)
 	{
 		RayLauncher launcher {};
 		Camera camera {};
@@ -101,26 +153,21 @@ namespace Aura::Core
 		if(!has_update) { return; }
 		{
 			// Pre-known values.
-			constexpr gpu_real pi = static_cast<gpu_real>(3.141592653589793);
-			constexpr gpu_real to_radians = pi / static_cast<gpu_real>(180.0);
-			constexpr gpu_real two = static_cast<gpu_real>(2.0);
+			constexpr float pi = static_cast<float>(3.141592653589793);
+			constexpr float to_radians = pi / 180.0f;
 			// Update camera points and vectors.
-			gpu_vec3 const lookfrom = gpu_vec3(
-				camera.transform.translation * camera.transform.rotation * camera.transform.scaling
-				* gpu_vec4(camera.look_from, 1.0));
-			gpu_vec3 const lookat = gpu_vec3(
-				camera.transform.translation * camera.transform.rotation * camera.transform.scaling
-				* gpu_vec4(camera.look_at, 1.0));
-			gpu_vec3 const vup = gpu_vec3(
-				camera.transform.translation * camera.transform.rotation * camera.transform.scaling
-				* gpu_vec4(camera.v_up, 1.0));
+			glm::mat4 const transform = camera.transform.translation *
+				camera.transform.rotation * camera.transform.scaling;
+			glm::vec3 const lookfrom = glm::vec3(transform * glm::vec4(camera.look_from, 1.0f));
+			glm::vec3 const lookat = glm::vec3(transform * glm::vec4(camera.look_at, 1.0f));
+			glm::vec3 const vup = glm::vec3(transform * glm::vec4(camera.v_up, 1.0f));
 			// Calculate helper values.
-			gpu_real const aspect = static_cast<gpu_real>(width) / static_cast<gpu_real>(height);
-			gpu_real const theta = camera.v_fov * to_radians;
-			gpu_real const half_height = tan(theta / two);
-			gpu_real const half_width = aspect * half_height;
+			float const aspect = static_cast<float>(width) / static_cast<float>(height);
+			float const theta = camera.v_fov * to_radians;
+			float const half_height = tan(theta / 2.0f);
+			float const half_width = aspect * half_height;
 			// Calculate ray launcher specification.
-			launcher.lens_radius = camera.aperture / two;
+			launcher.lens_radius = camera.aperture / 2.0f;
 			launcher.origin = lookfrom;
 			launcher.w = glm::normalize(lookfrom - lookat);
 			launcher.u = -glm::normalize(glm::cross(vup, launcher.w));
@@ -128,18 +175,19 @@ namespace Aura::Core
 			launcher.vertical = half_height * camera.focus * -launcher.v;
 			launcher.horizontal = half_width * camera.focus * -launcher.u;
 			launcher.corner = launcher.origin + launcher.vertical + launcher.horizontal - camera.focus * launcher.w;
-			launcher.vertical *= 2;
-			launcher.horizontal *= -2;
+			launcher.vertical *= 2.0f;
+			launcher.horizontal *= -2.0f;
+			launcher.max_bounces = ray_depth;
 		}
 		void * mem { nullptr };
-		vk::Result result { device.mapMemory(ray_launcher.memories[0],
-			ray_launcher.buffers[0].offset,ray_launcher.buffers[0].range, {}, &mem, dispatch) };
+		vk::Result result { device.mapMemory(ray_launcher.memories[0U],
+			ray_launcher.buffers[0U].offset,ray_launcher.buffers[0U].range, {}, &mem, dispatch) };
 		if(result != vk::Result::eSuccess)
 		{ vk::throwResultException(result, "RayLauncher memory map"); }
 		if(mem)
 		{
-			std::memcpy(mem, &launcher, ray_launcher.buffers[0].range);
-			device.unmapMemory(ray_launcher.memories[0], dispatch);
+			std::memcpy(mem, &launcher, ray_launcher.buffers[0U].range);
+			device.unmapMemory(ray_launcher.memories[0U], dispatch);
 		}
 	}
 
@@ -153,23 +201,30 @@ namespace Aura::Core
 	{
 		setUpDescriptorPool();
 
-		auto t1 = thread_pool.enqueue([&] { setUpChainImage(); });
-		auto t2 = thread_pool.enqueue([&] { setUpRayLauncher(); });
+		std::array<std::future<void>, 3> const jobs {
+			thread_pool.enqueue([&] { setUpRayLauncher(); }),
+			thread_pool.enqueue([&] { setUpRaysAndHits(); }),
+			thread_pool.enqueue([&] { setUpPixelsState(); })
+		};
 
-		if(!t1.valid()) { throw std::future_error(std::future_errc::no_state); }
-		if(!t2.valid()) { throw std::future_error(std::future_errc::no_state); }
-		t1.wait();
-		t2.wait();
-
+		for(std::size_t i { 0U }; i < jobs.size(); ++i)
+		{
+			if(!jobs[i].valid()) { throw std::future_error(std::future_errc::no_state); }
+			jobs[i].wait();
+		}
 		allocateAllDescriptorSets();
+
 		updateRayLauncherSet();
+		updateRaysAndHitsSet();
+		updatePixelsStateSet();
 	}
 	/// <summary>
 	/// Bulk tears-down all set-up resources, as well as, the descriptor pool.
 	/// </summary>
 	void RayTracer::tearDownResources()
 	{
-		tearDownChainImage();
+		tearDownPixelsState();
+		tearDownRaysAndHits();
 		tearDownRayLauncher();
 		tearDownDescriptorPool();
 	}
@@ -183,13 +238,17 @@ namespace Aura::Core
 
 		layouts.emplace_back(chain_image.set_layout);
 		layouts.emplace_back(ray_launcher.set_layout);
+		layouts.emplace_back(rays_and_hits.set_layout);
+		layouts.emplace_back(pixels_state.set_layout);
 
 		std::size_t n_sets { layouts.size() };
 		sets.resize(n_sets);
 		allocateDescriptorSets(pool, static_cast<std::uint32_t>(n_sets), layouts.data(), sets.data());
 
-		chain_image.set = sets[0];
-		ray_launcher.set = sets[1];
+		chain_image.set = sets[0U];
+		ray_launcher.set = sets[1U];
+		rays_and_hits.set = sets[2U];
+		pixels_state.set = sets[3U];
 	}
 	/// <summary>
 	/// Sets up the descriptor pool for all resources.
@@ -197,10 +256,11 @@ namespace Aura::Core
 	void RayTracer::setUpDescriptorPool()
 	{
 		constexpr std::uint32_t n_sets { 4U };
-		constexpr std::uint32_t n_sizes { 2U };
+		constexpr std::uint32_t n_sizes { 3U };
 		std::array<vk::DescriptorPoolSize, n_sizes> sizes {
 			// - Descriptor type and count.
 			vk::DescriptorPoolSize { vk::DescriptorType::eStorageImage, 1U },
+			vk::DescriptorPoolSize { vk::DescriptorType::eStorageImage, 3U },
 			vk::DescriptorPoolSize { vk::DescriptorType::eUniformBuffer, 1U } };
 		createDescriptorPool({}, n_sets, n_sizes, sizes.data(), pool);
 	}
@@ -210,42 +270,6 @@ namespace Aura::Core
 	void RayTracer::tearDownDescriptorPool()
 	{
 		destroyDescriptorPool(pool);
-	}
-	/// <summary>
-	/// Prepares a chain image layout.
-	/// </summary>
-	void RayTracer::setUpChainImage()
-	{
-		std::array<vk::DescriptorSetLayoutBinding, 1U> const binds {
-			// - Binding number, descriptor type and count.
-			// - Shader stage and sampler.
-			vk::DescriptorSetLayoutBinding { 0U, vk::DescriptorType::eStorageImage, 1U,
-				vk::ShaderStageFlagBits::eCompute, nullptr } };
-		createDescriptorSetLayout({}, 1U, binds.data(), chain_image.set_layout);
-	}
-	/// <summary>
-	/// Updates the chain image according to the frame index.
-	/// </summary>
-	void RayTracer::updateChainImageSet(std::uint32_t frame_index)
-	{
-		std::array<vk::DescriptorImageInfo, 1U> const images {
-			// - Sampler, view, layout.
-			vk::DescriptorImageInfo {nullptr, chain_views[frame_index], vk::ImageLayout::eGeneral}
-		};
-		std::array<vk::WriteDescriptorSet, 1U> const writes {
-			// - Destination set, binding and array element, count.
-			// - Type and info(Image, Buffer, Texel).
-			vk::WriteDescriptorSet{chain_image.set, 0U, 0U, 1U,
-				vk::DescriptorType::eStorageImage, &images[0], nullptr, nullptr}
-		};
-		device.updateDescriptorSets(1U, writes.data(), 0U, nullptr, dispatch);
-	}
-	/// <summary>
-	/// Destroys chain image layout.
-	/// </summary>
-	void RayTracer::tearDownChainImage()
-	{
-		destroyDescriptorSetLayout(chain_image.set_layout);
 	}
 	/// <summary>
 	/// Prepares ray launcher layout, buffer and its memory.
@@ -261,21 +285,27 @@ namespace Aura::Core
 				vk::ShaderStageFlagBits::eCompute, nullptr } };
 		createDescriptorSetLayout({}, n_buffers, binds.data(), ray_launcher.set_layout);
 
-		ray_launcher.buffers.resize(n_buffers);
-		ray_launcher.buffers[0].range = static_cast<vk::DeviceSize>(sizeof(RayLauncher));
-		createBuffer({}, ray_launcher.buffers[0].range, vk::BufferUsageFlagBits::eUniformBuffer,
-			1U, &compute_family, ray_launcher.buffers[0].buffer);
+		vk::DeviceSize const launcher_size { static_cast<vk::DeviceSize>(sizeof(RayLauncher)) };
+		vk::Buffer buffer {};
+		createBuffer({}, launcher_size, vk::BufferUsageFlagBits::eUniformBuffer,
+			1U, &compute_family, buffer);
 		vk::MemoryRequirements mem_launcher {};
-		device.getBufferMemoryRequirements(ray_launcher.buffers[0].buffer, &mem_launcher, dispatch);
+		device.getBufferMemoryRequirements(buffer, &mem_launcher, dispatch);
+
+		ray_launcher.buffers.resize(n_buffers);
+		ray_launcher.buffers[0U].buffer = buffer;
+		ray_launcher.buffers[0U].range = launcher_size;
+		ray_launcher.buffers[0U].offset = 0U;
 
 		ray_launcher.memories.resize(1U);
 		allocateMemory(mem_launcher,
 			vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostVisible |
 			vk::MemoryPropertyFlagBits::eHostCoherent,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-			ray_launcher.memories[0]);
-		device.bindBufferMemory(ray_launcher.buffers[0].buffer, ray_launcher.memories[0],
-			ray_launcher.buffers[0].offset, dispatch);
+			ray_launcher.memories[0U]);
+
+		device.bindBufferMemory(ray_launcher.buffers[0U].buffer, ray_launcher.memories[0U],
+			ray_launcher.buffers[0U].offset, dispatch);
 	}
 	/// <summary>
 	/// Writes ray launcher sets.
@@ -295,15 +325,133 @@ namespace Aura::Core
 	/// </summary>
 	void RayTracer::tearDownRayLauncher()
 	{
-		std::size_t n { ray_launcher.buffers.size() };
-		for(std::uint32_t i { 0U }; i < n; ++i)
-		{ destroyBuffer(ray_launcher.buffers[i].buffer); }
-
-		n = ray_launcher.memories.size();
-		for(std::uint32_t i { 0U }; i < n; ++i)
-		{ freeMemory(ray_launcher.memories[i]); }
-
+		destroyBuffer(ray_launcher.buffers[0U].buffer);
+		freeMemory(ray_launcher.memories[0U]);
 		destroyDescriptorSetLayout(ray_launcher.set_layout);
+	}
+	/// <summary>
+	/// Prepares rays and hits layout, buffers and memory.
+	/// </summary>
+	void RayTracer::setUpRaysAndHits()
+	{
+		constexpr std::uint32_t n_buffers { 2U };
+
+		std::array<vk::DescriptorSetLayoutBinding, n_buffers> const binds {
+			// - Binding number, descriptor type and count.
+			// - Shader stage and sampler.
+			vk::DescriptorSetLayoutBinding { 0U, vk::DescriptorType::eStorageBuffer, 1U,
+				vk::ShaderStageFlagBits::eCompute, nullptr },
+			vk::DescriptorSetLayoutBinding { 1U, vk::DescriptorType::eStorageBuffer, 1U,
+				vk::ShaderStageFlagBits::eCompute, nullptr } };
+		createDescriptorSetLayout({}, n_buffers, binds.data(), rays_and_hits.set_layout);
+
+		vk::DeviceSize const rays_size { static_cast<vk::DeviceSize>(sizeof(Ray) * width * height) };
+		vk::DeviceSize const hits_size { static_cast<vk::DeviceSize>(sizeof(Hit) * width * height) };
+		vk::Buffer buffer {};
+		createBuffer({}, rays_size + hits_size, vk::BufferUsageFlagBits::eStorageBuffer,
+			1U, &compute_family, buffer);
+		vk::MemoryRequirements mem_rays_and_hits {};
+		device.getBufferMemoryRequirements(buffer, &mem_rays_and_hits, dispatch);
+
+		rays_and_hits.buffers.resize(n_buffers);
+		rays_and_hits.buffers[0U].buffer = buffer;
+		rays_and_hits.buffers[0U].range = rays_size;
+		rays_and_hits.buffers[0U].offset = 0U;
+		rays_and_hits.buffers[1U].buffer = buffer;
+		rays_and_hits.buffers[1U].range = hits_size;
+		rays_and_hits.buffers[1U].offset = rays_size;
+
+		rays_and_hits.memories.resize(1U);
+		allocateMemory(mem_rays_and_hits,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			rays_and_hits.memories[0U]);
+
+		device.bindBufferMemory(rays_and_hits.buffers[0U].buffer, rays_and_hits.memories[0U],
+			rays_and_hits.buffers[0U].offset, dispatch);
+	}
+	/// <summary>
+	/// Update rays and hits set. This isn't mutable, and should only be
+	/// used once.
+	/// </summary>
+	void RayTracer::updateRaysAndHitsSet()
+	{
+		std::array<vk::WriteDescriptorSet, 2U> const writes {
+			// - Destination set, binding and array element, count.
+			// - Type and info(Image, Buffer, Texel).
+			vk::WriteDescriptorSet{rays_and_hits.set, 0U, 0U, 1U,
+				vk::DescriptorType::eStorageBuffer, nullptr, &rays_and_hits.buffers[0], nullptr},
+			vk::WriteDescriptorSet{rays_and_hits.set, 1U, 0U, 1U,
+				vk::DescriptorType::eStorageBuffer, nullptr, &rays_and_hits.buffers[1], nullptr}
+		};
+		device.updateDescriptorSets(2U, writes.data(), 0U, nullptr, dispatch);
+	}
+	/// <summary>
+	/// Destroys the rays and hits layout, buffers and memory.
+	/// </summary>
+	void RayTracer::tearDownRaysAndHits()
+	{
+		destroyBuffer(rays_and_hits.buffers[0U].buffer);
+		freeMemory(rays_and_hits.memories[0U]);
+		destroyDescriptorSetLayout(rays_and_hits.set_layout);
+	}
+	/// <summary>
+	/// Prepares pixels state layout, buffer and memory.
+	/// </summary>
+	void RayTracer::setUpPixelsState()
+	{
+		constexpr std::uint32_t n_buffers { 1U };
+
+		std::array<vk::DescriptorSetLayoutBinding, n_buffers> const binds {
+			// - Binding number, descriptor type and count.
+			// - Shader stage and sampler.
+			vk::DescriptorSetLayoutBinding { 0U, vk::DescriptorType::eStorageBuffer, 1U,
+				vk::ShaderStageFlagBits::eCompute, nullptr } };
+		createDescriptorSetLayout({}, n_buffers, binds.data(), pixels_state.set_layout);
+
+		vk::DeviceSize const pixels_size { static_cast<vk::DeviceSize>(sizeof(RayLauncher) * width * height) };
+		vk::Buffer buffer {};
+		createBuffer({}, pixels_size, vk::BufferUsageFlagBits::eStorageBuffer,
+			1U, &compute_family, buffer);
+		vk::MemoryRequirements mem_pixels {};
+		device.getBufferMemoryRequirements(buffer, &mem_pixels, dispatch);
+
+		pixels_state.buffers.resize(n_buffers);
+		pixels_state.buffers[0U].buffer = buffer;
+		pixels_state.buffers[0U].range = pixels_size;
+		pixels_state.buffers[0U].offset = 0U;
+
+		pixels_state.memories.resize(1U);
+		allocateMemory(mem_pixels,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			pixels_state.memories[0U]);
+
+		device.bindBufferMemory(pixels_state.buffers[0U].buffer, pixels_state.memories[0U],
+			pixels_state.buffers[0U].offset, dispatch);
+	}
+	/// <summary>
+	/// Update pixels state set. This isn't mutable, and should only be
+	/// used once.
+	/// </summary>
+	void RayTracer::updatePixelsStateSet()
+	{
+		std::array<vk::WriteDescriptorSet, 1U> const writes {
+			// - Destination set, binding and array element, count.
+			// - Type and info(Image, Buffer, Texel).
+			vk::WriteDescriptorSet{pixels_state.set, 0U, 0U, 1U,
+				vk::DescriptorType::eStorageBuffer, nullptr, &pixels_state.buffers[0], nullptr}
+		};
+		device.updateDescriptorSets(1U, writes.data(), 0U, nullptr, dispatch);
+	}
+	/// <summary>
+	/// Destroys the pixels state layout, buffer and memory.
+	/// </summary>
+	void RayTracer::tearDownPixelsState()
+	{
+		destroyBuffer(pixels_state.buffers[0U].buffer);
+		freeMemory(pixels_state.memories[0U]);
+		destroyDescriptorSetLayout(pixels_state.set_layout);
 	}
 
 	// ------------------------------------------------------------------ //
@@ -314,16 +462,29 @@ namespace Aura::Core
 	/// </summary>
 	void RayTracer::setUpPipelines(ThreadPool & thread_pool)
 	{
-		auto t1 = thread_pool.enqueue([&] { setUpGenPipeline(); });
+		std::array<std::future<void>, 5> const jobs {
+			thread_pool.enqueue([&] { setUpGenPipeline(); }),
+			thread_pool.enqueue([&] { setUpIntersectPipeline(); }),
+			thread_pool.enqueue([&] { setUpColourPipeline(); }),
+			thread_pool.enqueue([&] { setUpScatterPipeline(); }),
+			thread_pool.enqueue([&] { setUpPostProcessPipeline(); })
+		};
 
-		if(!t1.valid()) { throw std::future_error(std::future_errc::no_state); }
-		t1.wait();
+		for(std::size_t i { 0U }; i < jobs.size(); ++i)
+		{
+			if(!jobs[i].valid()) { throw std::future_error(std::future_errc::no_state); }
+			jobs[i].wait();
+		}
 	}
 	/// <summary>
 	/// Bulk tears-down all set-up pipelines.
 	/// </summary>
 	void RayTracer::tearDownPipelines()
 	{
+		tearDownPostProcessPipeline();
+		tearDownScatterPipeline();
+		tearDownColourPipeline();
+		tearDownIntersectPipeline();
 		tearDownGenPipeline();
 	}
 	/// <summary>
@@ -334,11 +495,11 @@ namespace Aura::Core
 		vk::PipelineCache cache {};
 		vk::ShaderModule shader {};
 
-		std::array<vk::DescriptorSetLayout, 2U> const set_layouts {
-			ray_launcher.set_layout, chain_image.set_layout };
+		std::array<vk::DescriptorSetLayout, 3U> const set_layouts {
+			ray_launcher.set_layout, rays_and_hits.set_layout, pixels_state.set_layout };
 		vk::PushConstantRange const push {
 			vk::ShaderStageFlagBits::eCompute, 0U, sizeof(RandomOffset) };
-		createPipelineLayout({}, 2U, set_layouts.data(), 1U, &push, gen.layout);
+		createPipelineLayout({}, 3U, set_layouts.data(), 1U, &push, gen.layout);
 
 		auto path = std::string(shader_folder);
 		path += "ray-gen.spv";
@@ -358,5 +519,129 @@ namespace Aura::Core
 	{
 		destroyPipelineLayout(gen.layout);
 		destroyPipeline(gen.pipeline);
+	}
+	/// <summary>
+	/// Prepares the intersect layout, shader module and pipeline.
+	/// </summary>
+	void RayTracer::setUpIntersectPipeline()
+	{
+		vk::PipelineCache cache {};
+		vk::ShaderModule shader {};
+
+		std::array<vk::DescriptorSetLayout, 1U> const set_layouts {
+			rays_and_hits.set_layout };
+		createPipelineLayout({}, 1U, set_layouts.data(), 0U, nullptr, intersect.layout);
+
+		auto path = std::string(shader_folder);
+		path += "intersect.spv";
+		createShaderModule({}, path.c_str(), shader);
+
+		vk::PipelineShaderStageCreateInfo const stage { {},
+			vk::ShaderStageFlagBits::eCompute, shader, "main", nullptr };
+		vk::ComputePipelineCreateInfo const create_info { {}, stage,
+			intersect.layout, vk::Pipeline(), 0U };
+		createComputePipelines(cache, 1U, &create_info, &intersect.pipeline);
+		destroyShaderModule(shader);
+	}
+	/// <summary>
+	/// Destroys the intersect pipeline, layout 
+	/// </summary>
+	void RayTracer::tearDownIntersectPipeline()
+	{
+		destroyPipelineLayout(intersect.layout);
+		destroyPipeline(intersect.pipeline);
+	}
+	/// <summary>
+	/// Prepares the colour layout, shader module and pipeline.
+	/// </summary>
+	void RayTracer::setUpColourPipeline()
+	{
+		vk::PipelineCache cache {};
+		vk::ShaderModule shader {};
+
+		std::array<vk::DescriptorSetLayout, 2U> const set_layouts {
+			rays_and_hits.set_layout, pixels_state.set_layout };
+		createPipelineLayout({}, 2U, set_layouts.data(), 0U, nullptr, colour.layout);
+
+		auto path = std::string(shader_folder);
+		path += "colour.spv";
+		createShaderModule({}, path.c_str(), shader);
+
+		vk::PipelineShaderStageCreateInfo const stage { {},
+			vk::ShaderStageFlagBits::eCompute, shader, "main", nullptr };
+		vk::ComputePipelineCreateInfo const create_info { {}, stage,
+			colour.layout, vk::Pipeline(), 0U };
+		createComputePipelines(cache, 1U, &create_info, &colour.pipeline);
+		destroyShaderModule(shader);
+	}
+	/// <summary>
+	/// Destroys the colour pipeline, layout 
+	/// </summary>
+	void RayTracer::tearDownColourPipeline()
+	{
+		destroyPipelineLayout(colour.layout);
+		destroyPipeline(colour.pipeline);
+	}
+	/// <summary>
+	/// Prepares the scatter layout, shader module and pipeline.
+	/// </summary>
+	void RayTracer::setUpScatterPipeline()
+	{
+		vk::PipelineCache cache {};
+		vk::ShaderModule shader {};
+
+		std::array<vk::DescriptorSetLayout, 1U> const set_layouts {
+			rays_and_hits.set_layout };
+		createPipelineLayout({}, 1U, set_layouts.data(), 0U, nullptr, scatter.layout);
+
+		auto path = std::string(shader_folder);
+		path += "scatter.spv";
+		createShaderModule({}, path.c_str(), shader);
+
+		vk::PipelineShaderStageCreateInfo const stage { {},
+			vk::ShaderStageFlagBits::eCompute, shader, "main", nullptr };
+		vk::ComputePipelineCreateInfo const create_info { {}, stage,
+			scatter.layout, vk::Pipeline(), 0U };
+		createComputePipelines(cache, 1U, &create_info, &scatter.pipeline);
+		destroyShaderModule(shader);
+	}
+	/// <summary>
+	/// Destroys the scatter pipeline, layout 
+	/// </summary>
+	void RayTracer::tearDownScatterPipeline()
+	{
+		destroyPipelineLayout(scatter.layout);
+		destroyPipeline(scatter.pipeline);
+	}
+	/// <summary>
+	/// Prepares the post-processing layout, shader module and pipeline.
+	/// </summary>
+	void RayTracer::setUpPostProcessPipeline()
+	{
+		vk::PipelineCache cache {};
+		vk::ShaderModule shader {};
+
+		std::array<vk::DescriptorSetLayout, 2U> const set_layouts {
+			pixels_state.set_layout, chain_image.set_layout };
+		createPipelineLayout({}, 2U, set_layouts.data(), 0U, nullptr, post_process.layout);
+
+		auto path = std::string(shader_folder);
+		path += "post-process.spv";
+		createShaderModule({}, path.c_str(), shader);
+
+		vk::PipelineShaderStageCreateInfo const stage { {},
+			vk::ShaderStageFlagBits::eCompute, shader, "main", nullptr };
+		vk::ComputePipelineCreateInfo const create_info { {}, stage,
+			post_process.layout, vk::Pipeline(), 0U };
+		createComputePipelines(cache, 1U, &create_info, &post_process.pipeline);
+		destroyShaderModule(shader);
+	}
+	/// <summary>
+	/// Destroys the post-processing pipeline, layout 
+	/// </summary>
+	void RayTracer::tearDownPostProcessPipeline()
+	{
+		destroyPipelineLayout(post_process.layout);
+		destroyPipeline(post_process.pipeline);
 	}
 }

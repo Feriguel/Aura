@@ -1,0 +1,51 @@
+// ========================================================================== //
+// File : post-process.comp
+//
+// Author : Miguel Ângelo Crespo Ferreira
+// ========================================================================== //
+#version 460
+// Workspace settings.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+// Radius of pixels to average around target.
+#define AVG_RADIUS			1
+// Pixel colour output.
+struct Pixel { 
+	vec4 colour; 
+	uint bounces;
+};
+layout(std140, set = 0, binding = 0) buffer readonly Pixels {
+	Pixel[] pixels;
+};
+// Output image.
+layout(rgba8, set = 1, binding = 0) uniform writeonly image2D frame;
+
+// Outputs the image colour per pixel as the average between all the pixels
+// around a pre-set radius.
+vec4 avgColour(in const ivec2 pixel)
+{
+	// Calculate ranges.
+	const uint width = gl_WorkGroupSize.s * gl_NumWorkGroups.s;
+	const uint height = gl_WorkGroupSize.t * gl_NumWorkGroups.t;
+	const uint s_min = pixel.s - AVG_RADIUS < 0 ? 0 : pixel.s - AVG_RADIUS;
+	const uint s_max = width < pixel.s + AVG_RADIUS ? width : pixel.s + AVG_RADIUS;
+	const uint t_min = pixel.t - AVG_RADIUS < 0 ? 0 : pixel.t - AVG_RADIUS;
+	const uint t_max = height < pixel.t + AVG_RADIUS ? height : pixel.t + AVG_RADIUS;
+	// Determine average colour of grid.
+	vec4 colour = vec4(0.0);
+	const uint n_pixels = s_max - s_min + t_max - t_min;
+	for(uint s = s_min; s < s_max; ++s)
+	{
+		for(uint t = t_min; t < t_max; ++t)
+		{
+			const uint idx = s + s * t;
+			colour += pixels[idx].colour / (pixels[idx].bounces * n_pixels);
+		}
+	}
+	return colour;
+}
+void main()
+{
+	const ivec2 pixel = ivec2(gl_GlobalInvocationID.s, gl_GlobalInvocationID.t);
+	vec4 colour = avgColour(pixel);
+	imageStore(frame, pixel, colour);
+}

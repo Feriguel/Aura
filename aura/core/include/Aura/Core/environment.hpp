@@ -7,7 +7,6 @@
 #ifndef AURACORE_ENV
 #define AURACORE_ENV
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 #include <Aura/Core/Environment/structures.hpp>
 // Standard includes.

@@ -1,0 +1,46 @@
+// ========================================================================== //
+// File : scatter.comp
+//
+// Author : Miguel Ângelo Crespo Ferreira
+// ========================================================================== //
+#version 460
+
+// Decimal cases helper ->	0.123456789012345
+#define PRECISION			0.0000001
+#define PI					3.1415927
+// Workspace settings.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+// Rays and hits.
+// Rays and hits.
+struct Ray {
+	vec4 albedo;
+	vec3 origin;
+	uint bounces_left;
+	vec3 direction;
+};
+layout(std140, set = 0, binding = 0) buffer writeonly Rays {
+	Ray[] rays;
+};
+struct Hit {
+	vec3 point;
+	float time;
+	vec3 normal;
+	uint object_idx;
+};
+layout(std140, set = 0, binding = 1) buffer readonly Hits {
+	Hit[] hits;
+};
+// Pixel state.
+struct Pixel { 
+	vec4 colour; 
+	uint bounces;
+};
+// Does nothing.
+void main()
+{
+	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.x * gl_GlobalInvocationID.y;
+	if(hits[idx].time == 0.0)
+	{
+		rays[idx].bounces_left = 0;
+	}
+}

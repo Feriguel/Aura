@@ -5,7 +5,6 @@
 // ========================================================================== //
 #include <Aura/engine.hpp>
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 #include <Aura/Core/nucleus.hpp>
 // Standard includes.

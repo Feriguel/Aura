@@ -4,7 +4,6 @@
 // Author : Miguel Ângelo Crespo Ferreira
 // ========================================================================== //
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 #include <Aura/Core/nucleus.hpp>
 // Standard includes.
@@ -73,14 +72,12 @@ namespace Aura::Test
 	}
 	TEST_F(CoreEnv, SixtyFrameLoop)
 	{
-		std::uint32_t frames { core->run(60U) };
-		std::cout << "Frames rendered: " << frames << std::endl;
-		ASSERT_TRUE(frames >= 60U);
+		core->run(60U);
+		ASSERT_TRUE(core->frame_counter >= 60U);
 	}
 	TEST_F(CoreEnv, InfLoop)
 	{
-		std::uint32_t frames { core->run() };
-		ASSERT_TRUE(frames == 0U);
+		core->run();
 	}
 }
 

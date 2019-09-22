@@ -1,45 +1,107 @@
 // ========================================================================== //
 // File : ray_gen.comp
 //
-// Author : Miguel Ângelo Crespo Ferreira
+// Author : Miguel Ã‚ngelo Crespo Ferreira
 // ========================================================================== //
 #version 460
-
-// Decimal cases helper ->	0.123456789012345
-#define PRECISION			0.0000001
-#define PI					3.1415927
 // Workspace settings.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+// Decimal cases helper ->	0.123456789012345
+#define MIN_PRECISION		0.0000001
 // Ray launcher.
-layout(std140, set = 0, binding = 0) uniform RayLauncher {
+layout(std140, set = 0, binding = 0) uniform Launcher {
 	vec3 origin;
-	vec3 top_left_corner;
+	uint max_bounces;
+	vec3 corner;
+	float lens_radius;
 	vec3 horizontal;
 	vec3 vertical;
 	vec3 u;
 	vec3 v;
 	vec3 w;
-	float lens_radius;
 };
-// Output image.
-layout(rgba8, set = 1, binding = 0) uniform writeonly image2D frame;
-// Randomizer.
-layout(push_constant) uniform Randomizer {
-	float[2] random;
+// Rays and hits.
+struct Ray {
+	vec4 albedo;
+	vec3 origin;
+	uint bounces_left;
+	vec3 direction;
 };
-// Determines the direction to pixel. Applies a deviation based on the lens radius.
-vec3 pixelDirection(in const float s, in const float t)
+layout(std140, set = 1, binding = 0) buffer writeonly Rays {
+	Ray[] rays;
+};
+struct Hit {
+	vec3 point;
+	float time;
+	vec3 normal;
+	uint object_idx;
+};
+layout(std140, set = 1, binding = 1) buffer writeonly Hits {
+	Hit[] hits;
+};
+// Pixel state.
+struct Pixel { 
+	vec4 colour; 
+	uint bounces;
+};
+layout(std140, set = 2, binding = 0) buffer writeonly Pixels {
+	Pixel[] pixels;
+};
+// Offset randomiser.
+layout(push_constant) uniform Random {
+	float s;
+	float t;
+} random;
+
+// Determines the direction to pixel at workspace position from the origin of
+// the ray at idx. Directions with length below MIN_PRECISION return false.
+vec3 targetDirection(in const vec3 ray_o)
 {
-	const vec3 offset = u * lens_radius * random[0] + v * lens_radius * random[1];
-	return normalize(top_left_corner - origin - offset + s * horizontal + t * vertical);
+	// Calculate target point (pixel coordinates).
+	const float s = float(gl_GlobalInvocationID.s) / float(gl_WorkGroupSize.s * gl_NumWorkGroups.s);
+	const float t = float(gl_GlobalInvocationID.t) / float(gl_WorkGroupSize.t * gl_NumWorkGroups.t);
+	const vec3 p = corner + s * horizontal + t * vertical;
+	// Calculate normalised direction.
+	const vec3 d = p - ray_o;
+	const float l = length(d);
+	if (l < MIN_PRECISION)
+	{
+		return vec3(0.0);
+	}
+	else
+	{
+		return d / l;
+	}
 }
-// Generates a ray for each workspace position. The work space should be the
-// output image dimensions.
+// Randomises a ray origin within the lens. Applies a deviation based on the
+// lens radius.
+vec3 lensOrigin()
+{
+	const vec3 offset = u * lens_radius * random.s + v * lens_radius * random.t;
+	return origin + offset;
+}
+// Generates a ray for each workspace position and initialises the hit structures.
+// The work space should be the output image dimensions.
 void main()
 {
-	const ivec2 pixel = ivec2(gl_GlobalInvocationID.s, gl_GlobalInvocationID.t);
-	const float s = float(pixel.s) / float(gl_WorkGroupSize.s * gl_NumWorkGroups.s);
-	const float t = float(pixel.t) / float(gl_WorkGroupSize.t * gl_NumWorkGroups.t);
-	const vec3 direction = pixelDirection(s, t);
-	imageStore(frame, pixel, vec4(direction, 1.0f));
+	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.x * gl_GlobalInvocationID.y;
+	const vec3 ray_o = lensOrigin();
+	const vec3 ray_d = targetDirection(ray_o);
+	if(ray_d == vec3(0.0))
+	{
+		rays[idx].bounces_left = 0;
+	}
+	else
+	{
+		rays[idx].bounces_left = max_bounces;
+	}
+	rays[idx].albedo = vec4(1.0, 1.0, 1.0, 1.0);
+	rays[idx].origin = ray_o;
+	rays[idx].direction = ray_d;
+	hits[idx].time = 0.0;
+	hits[idx].point = vec3(0.0);
+	hits[idx].normal = vec3(0.0);
+	hits[idx].object_idx = 0;
+	pixels[idx].colour = vec4(1.0, 0.0, 1.0, 1.0);
+	pixels[idx].bounces = 0;
 }

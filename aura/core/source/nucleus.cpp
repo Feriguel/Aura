@@ -5,7 +5,6 @@
 // ========================================================================== //
 #include <Aura/Core/nucleus.hpp>
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 #include <Aura/Core/Utilities/info.hpp>
 #include <Aura/Core/Utilities/rng.hpp>
@@ -14,6 +13,7 @@
 #include <Aura/Core/environment.hpp>
 #include <Aura/Core/render.hpp>
 // Standard includes.
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <mutex>
@@ -46,6 +46,7 @@ namespace Aura::Core
 		render.selectPhysicalDevice();
 		render.createDevice();
 		render.createFramework();
+		render.setUpDispatch();
 		renderStart();
 	}
 	/// <summary>
@@ -59,6 +60,7 @@ namespace Aura::Core
 			std::unique_lock<std::mutex> lock { stop_guard };
 			stop_event.wait(lock, [&] { return !rendering; });
 		}
+		render.tearDownDispatch();
 		render.destroyFramework();
 		render.destroyDevice();
 		render.destroySurface();
@@ -72,7 +74,7 @@ namespace Aura::Core
 	/// Can be used in a separate thread to permit mid run environment
 	/// transformations.
 	/// </summary>
-	std::uint32_t Nucleus::run(std::uint32_t const max_frames)
+	void Nucleus::run(std::uint32_t const max_frames)
 	{
 		if(stop) { renderStart(); }
 		frameCounterReset(max_frames);
@@ -82,7 +84,6 @@ namespace Aura::Core
 
 			if(renderShouldStop()) { break; }
 		}
-		return frame_counter;
 	}
 	/// <summary>
 	/// Frame render cycle. Queries for changes in environment, and updates
@@ -97,9 +98,22 @@ namespace Aura::Core
 		}
 		while(true)
 		{
+			// Time stamps.
+			std::chrono::time_point<std::chrono::system_clock> start, end;
+
 			if(renderShouldStop()) { break; }
+			// If should marker time stamp.
+			if constexpr(debug_settings.frame_time)
+			{
+				start = std::chrono::system_clock::now();
+			}
 			bool result { render.renderFrame() };
-			if(frame_limit == 0) { continue; }
+			if constexpr(debug_settings.frame_time)
+			{
+				end = std::chrono::system_clock::now();
+				std::cout << std::chrono::duration<double, std::milli>(end - start).count() << std::endl;
+			}
+			if(frame_limit == 0U) { continue; }
 			if(result) { frameCounterIncrement(); }
 			if(frameCounterCheck()) { renderStop(); }
 		}
@@ -116,7 +130,7 @@ namespace Aura::Core
 	{
 		std::unique_lock<std::mutex> lock { frame_guard };
 		frame_limit = max_frames;
-		frame_counter = 0;
+		frame_counter = 0U;
 	}
 	/// <summary>
 	/// Checks if the frame counter reached or surpassed the limit.
@@ -179,8 +193,7 @@ namespace Aura::Core
 	/// </summary>
 	void Nucleus::updateDisplaySettings(DisplaySettings const & new_settings)
 	{
-		bool window_reset { false };
-		bool device_reset { false };
+		bool window_reset, device_reset, sync_reset { false };
 		{
 			window_reset =
 				new_settings.window_mode != display_settings.window_mode ||
@@ -188,8 +201,11 @@ namespace Aura::Core
 				new_settings.height != display_settings.height;
 			device_reset =
 				new_settings.device_name != display_settings.device_name;
+			sync_reset =
+				new_settings.anti_aliasing != display_settings.anti_aliasing ||
+				new_settings.ray_depth != display_settings.ray_depth;
 		}
-		if(!window_reset && !device_reset)
+		if(!window_reset && !device_reset && !sync_reset)
 		{
 			display_settings = new_settings;
 			return;
@@ -200,8 +216,12 @@ namespace Aura::Core
 			std::unique_lock<std::mutex> lock { stop_guard };
 			stop_event.wait(lock, [&] { return !rendering; });
 		}
-		render.destroyFramework();
-		render.destroyDevice();
+		render.tearDownDispatch();
+		if(device_reset || window_reset)
+		{
+			render.destroyFramework();
+			render.destroyDevice();
+		}
 		if(window_reset)
 		{
 			render.destroySurface();
@@ -213,9 +233,13 @@ namespace Aura::Core
 			render.createSurface();
 			render.checkPhysicalDevices();
 		}
-		render.selectPhysicalDevice();
-		render.createDevice();
-		render.createFramework();
+		if(device_reset)
+		{
+			render.selectPhysicalDevice();
+			render.createDevice();
+			render.createFramework();
+		}
+		render.setUpDispatch();
 		renderStart();
 	}
 	/// <summary>

@@ -7,8 +7,6 @@
 #ifndef AURACORE_RENDER_FRAMEWORK
 #define AURACORE_RENDER_FRAMEWORK
 // Internal includes.
-#include <Aura/Core/types.hpp>
-#include <Aura/Core/settings.hpp>
 // Standard includes.
 #include <cstdint>
 #include <exception>
@@ -304,16 +302,12 @@ namespace Aura::Core
 			std::uint32_t & type_index) const noexcept
 		{
 			std::uint32_t const memory_count = memory_properties.memoryTypeCount;
-			for(std::uint32_t i = 0; i < memory_count; ++i)
+			for(std::uint32_t i { 0U }; i < memory_count; ++i)
 			{
-				std::uint32_t const memory_type_bits =
-					(static_cast<std::uint32_t>(1) << i);
-				bool const is_type =
-					requirements.memoryTypeBits & memory_type_bits;
-				vk::MemoryPropertyFlags const flags(
-					memory_properties.memoryTypes[i].propertyFlags);
-				bool const is_fit =
-					(flags & required_properties) == required_properties;
+				std::uint32_t const memory_type_bits { 1U << i };
+				bool const is_type { static_cast<bool>(requirements.memoryTypeBits & memory_type_bits) };
+				vk::MemoryPropertyFlags const flags { memory_properties.memoryTypes[i].propertyFlags };
+				bool const is_fit = { (flags & required_properties) == required_properties };
 				if(is_type && is_fit)
 				{
 					type_index = i;
@@ -336,7 +330,7 @@ namespace Aura::Core
 			}
 			auto const n_chars = static_cast<std::size_t>(file.tellg());
 			binary.resize(n_chars);
-			file.seekg(0, file.beg).read(binary.data(), n_chars);
+			file.seekg(0U, file.beg).read(binary.data(), n_chars);
 			file.close();
 		}
 	};

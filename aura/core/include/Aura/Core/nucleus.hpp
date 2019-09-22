@@ -7,7 +7,6 @@
 #ifndef AURACORE_NUCLEUS
 #define AURACORE_NUCLEUS
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 #include <Aura/Core/Utilities/info.hpp>
 #include <Aura/Core/Utilities/rng.hpp>
@@ -39,14 +38,18 @@ namespace Aura::Core
 		DisplaySettings display_settings;
 		// Holds the window and all user related inputs callbacks.
 		UI ui;
+		public:
 		// Holds the current loaded scene.
 		Environment environment;
+		private:
 		// Holds the program render and render cycle.
 		Render render;
 		// Render frame counter guard.
 		std::mutex frame_guard;
+		public:
 		// Render frame counter.
 		std::uint32_t frame_counter;
+		private:
 		// Render frame counter limit.
 		std::uint32_t frame_limit;
 		// Render stop guard.
@@ -88,7 +91,7 @@ namespace Aura::Core
 		/// transformations.
 		/// Returns the frame counter value at stop condition.
 		/// </summary>
-		std::uint32_t run(std::uint32_t const max_frames = 0U);
+		void run(std::uint32_t const max_frames = 0U);
 		private:
 		/// <summary>
 		/// Frame render cycle. Queries for changes in environment, and updates

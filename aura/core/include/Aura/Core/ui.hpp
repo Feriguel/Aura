@@ -7,7 +7,6 @@
 #ifndef AURACORE_UI
 #define AURACORE_UI
 // Internal includes.
-#include <Aura/Core/types.hpp>
 #include <Aura/Core/settings.hpp>
 // Standard includes.
 #include <string>
