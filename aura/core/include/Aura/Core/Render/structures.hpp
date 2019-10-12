@@ -9,9 +9,12 @@
 // Internal includes.
 // Standard includes.
 #include <cstdint>
+#include <array>
 // External includes.
+#pragma warning(disable : 26812)
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
+#pragma warning(default : 26812)
 
 /// <summary>
 /// Aura main namespace.
@@ -25,6 +28,44 @@ namespace Aura
 	{
 #	pragma warning(disable : 4324)
 		/// <summary>
+		/// Structure used in the uniform buffer to supply fixed settings into the
+		/// shader trough all stages.
+		/// </summary>
+		struct RenderSettings
+		{
+			// Minimum accepted ray travel distance.
+			float t_min = { 0U };
+			// Maximum accepted ray travel distance.
+			float t_max = { 0U };
+			// Number bounces allowed per ray.
+			std::uint32_t n_bounces = { 0U };
+			// Number of samples per frame.
+			std::uint32_t n_samples = { 0U };
+			// Number of primitives in scene.
+			std::uint32_t n_primitives = { 0U };
+			// Image width.
+			std::uint32_t width = { 0U };
+			// Image height.
+			std::uint32_t height = { 0U };
+		};
+		/// <summary>
+		/// Structure which contains random values supplied by push constants to
+		/// the shader.
+		/// </summary>
+		struct RandomSeed
+		{
+			glm::vec2 seed {};
+		};
+		/// <summary>
+		/// Structure which contains random values supplied by push constants to
+		/// the shader.
+		/// </summary>
+		struct RandomPointInCircleAndSeed
+		{
+			glm::vec3 point {};
+			float seed {};
+		};
+		/// <summary>
 		/// Representation of camera used within the shader to determine the rays
 		/// origin and direction.
 		/// </summary>
@@ -32,12 +73,10 @@ namespace Aura
 		{
 			// Camera origin.
 			glm::vec3 origin { 0.0f, 0.0f, 0.0f };
-			// Maximum bounces allowed per ray.
-			std::uint32_t max_bounces = { 0U };
-			// Image top left corner.
-			glm::vec3 corner { 0.0f, 0.0f, 0.0f };
 			// Camera lens radius used to perform a scope effect.
 			float lens_radius { 1.0f };
+			// Image top left corner.
+			alignas(sizeof(glm::vec4)) glm::vec3 corner { 0.0f, 0.0f, 0.0f };
 			// Image horizontal extension.
 			alignas(sizeof(glm::vec4)) glm::vec3 horizontal { 1.0f, 0.0f, 0.0f };
 			// Image vertical extension.
@@ -54,14 +93,14 @@ namespace Aura
 		/// </summary>
 		struct Ray
 		{
-			// Ray colour strength.
-			glm::vec4 albedo { 1.0f, 1.0f, 1.0f, 1.0f };
 			// Ray origin.
-			glm::vec3 origin { 0.0f, 0.0f, 0.0f };
-			// Bounces performed by the ray.
-			std::uint32_t bounces { 0U };
+			alignas(sizeof(glm::vec4)) glm::vec3 origin { 0.0f, 0.0f, 0.0f };
 			// Ray direction.
 			alignas(sizeof(glm::vec4)) glm::vec3 direction { 0.0f, 0.0f, 1.0f };
+			// Ray colour strength.
+			glm::vec3 albedo { 1.0f, 1.0f, 1.0f };
+			// If ray has not missed.
+			std::uint32_t missed { 0U };
 		};
 		/// <summary>
 		/// Ray hit description.
@@ -74,8 +113,10 @@ namespace Aura
 			float time { 1.0f };
 			// Ray direction.
 			glm::vec3 normal { 0.0f, 0.0f, 0.0f };
-			// Bounces performed by the ray.
-			std::uint32_t bounces { 0U };
+			// Hit material index.
+			std::uint32_t m_idx { 0U };
+			// Inner hit flag.
+			std::uint32_t inside { 0U };
 		};
 		/// <summary>
 		/// Pixel state.
@@ -84,21 +125,8 @@ namespace Aura
 		{
 			// Sum of all obtained colours.
 			glm::vec4 colour { 0.0f, 0.0f, 0.0f, 0.0f };
-			// Total bounces in this pixel.
-			std::uint32_t bounces { 0U };
 		};
 #	pragma warning(default : 4324)
-		/// <summary>
-		/// Structure which contains the random values supplied by push constants to
-		/// the shader.
-		/// </summary>
-		struct RandomOffset
-		{
-			// Horizontal offset.
-			float s { 0.0f };
-			// Vertical offset.
-			float t { 0.0f };
-		};
 	}
 }
 

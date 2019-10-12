@@ -63,8 +63,13 @@ namespace Aura::Core
 	/// </summary>
 	class RayTracer : public VulkanSwapchain
 	{
-		// RayGen work group sizes.
-		static constexpr std::uint32_t const group_size[3U] = { 8U, 8U, 1U };
+		// Work group sizes.
+		static constexpr std::uint32_t pre_gsize[3U] = { 16U, 16U, 1U };
+		static constexpr std::uint32_t vertex_gsize[3U] = { 128U, 1U, 1U };
+		static constexpr std::uint32_t gen_gsize[3U] = { 16U, 16U, 1U };
+		static constexpr std::uint32_t intersect_gsize[3U] = { 16U, 16U, 1U };
+		static constexpr std::uint32_t colour_and_scatter_gsize[3U] = { 16U, 16U, 1U };
+		static constexpr std::uint32_t post_gsize[3U] = { 16U, 16U, 1U };
 		// Shader folder location
 		static constexpr char const * shader_folder = "../aura/core/shaders/";
 		// Scene access shared guard.
@@ -72,31 +77,37 @@ namespace Aura::Core
 		// Current scene
 		Scene * const & scene;
 		// Image width in pixels.
-		std::uint32_t const & width;
+		std::uint32_t const width;
 		// Image height in pixels.
-		std::uint32_t const & height;
+		std::uint32_t const height;
 		// Compute family index.
 		std::uint32_t const compute_family;
 		// Transfer family index.
 		std::uint32_t const transfer_family;
 		// Vulkan descriptor pool.
 		vk::DescriptorPool pool;
+		// Render settings.
+		Resource render_settings;
 		// Ray launcher.
 		Resource ray_launcher;
-		// Rays and hits.
-		Resource rays_and_hits;
-		// Pixels state.
-		Resource pixels_state;
+		// Rays, Hits and Pixels.
+		Resource rays_state;
+		// Scene information.
+		Resource scene_info;
+		// Pre processing pipeline.
+		Pipeline pre_process;
+		// Absorption and colouring pipeline.
+		Pipeline vertex;
 		// Ray Generation pipeline.
 		Pipeline gen;
-		// Ray Generation pipeline.
+		// Intersection pipeline.
 		Pipeline intersect;
-		// Ray Generation pipeline.
-		Pipeline colour;
-		// Ray Generation pipeline.
-		Pipeline scatter;
-		// Ray Generation pipeline.
+		// Scattering pipeline.
+		Pipeline colour_and_scatter;
+		// Post processing pipeline.
 		Pipeline post_process;
+		// Image height in pixels.
+		std::uint32_t n_primitives;
 
 		// ------------------------------------------------------------------ //
 		// Set-up and tear-down.
@@ -112,7 +123,7 @@ namespace Aura::Core
 			vk::SurfaceKHR const & surface, vk::Extent2D const & chain_base_extent,
 			std::uint32_t const compute_family, std::uint32_t const transfer_family,
 			std::uint32_t const present_family, ThreadPool & thread_pool,
-			std::uint32_t const & width, std::uint32_t const & height,
+			std::uint32_t const width, std::uint32_t const height,
 			std::shared_mutex & scene_guard, Scene * const & scene);
 		/// <summary>
 		/// Stops rendering and tears-down the core.
@@ -123,21 +134,25 @@ namespace Aura::Core
 		// Recordings.
 		// ------------------------------------------------------------------ //
 		/// <summary>
+		/// Records a pre-processing operation.
+		/// </summary>
+		void recordPreProcess(vk::CommandBuffer const & command) const;
+		/// <summary>
+		/// Records a vertex input transform operation.
+		/// </summary>
+		void recordVertex(vk::CommandBuffer const & command) const;
+		/// <summary>
 		/// Records a ray-generation operation.
 		/// </summary>
-		void recordRayGen(RandomOffset & push, vk::CommandBuffer const & command) const;
+		void recordRayGen(RandomSeed & push, vk::CommandBuffer const & command) const;
 		/// <summary>
 		/// Records a intersect operation.
 		/// </summary>
 		void recordIntersect(vk::CommandBuffer const & command) const;
 		/// <summary>
-		/// Records a absorption and colouring operation.
-		/// </summary>
-		void recordColour(vk::CommandBuffer const & command) const;
-		/// <summary>
 		/// Records a scatter operation.
 		/// </summary>
-		void recordScatter(vk::CommandBuffer const & command) const;
+		void recordColourAndScatter(RandomPointInCircleAndSeed & push, vk::CommandBuffer const & command) const;
 		/// <summary>
 		/// Records a post-processing operation.
 		/// </summary>
@@ -147,9 +162,18 @@ namespace Aura::Core
 		// Resource updates.
 		// ------------------------------------------------------------------ //
 		/// <summary>
+		/// Updates the render settings.
+		/// </summary>
+		void updateRenderSettings(float const t_min, float const t_max,
+			std::uint32_t const n_samples, std::uint32_t const n_bounces);
+		/// <summary>
 		/// Updates the ray launcher using the camera in the scene.
 		/// </summary>
-		void updateRayLauncher(std::uint32_t const ray_depth);
+		bool updateRayLauncher();
+		/// <summary>
+		/// Updates scene vertices.
+		/// </summary>
+		bool updateScene();
 
 		// ------------------------------------------------------------------ //
 		// Resources.
@@ -176,6 +200,19 @@ namespace Aura::Core
 		/// </summary>
 		void tearDownDescriptorPool();
 		/// <summary>
+		/// Prepares render settings layout, buffers and memory.
+		/// </summary>
+		void setUpRenderSettings();
+		/// <summary>
+		/// Update render settings set. This isn't mutable, and should only be
+		/// used once.
+		/// </summary>
+		void updateRenderSettingsSet();
+		/// <summary>
+		/// Destroys the render settings layout, buffers and memory.
+		/// </summary>
+		void tearDownRenderSettings();
+		/// <summary>
 		/// Prepares ray launcher layout, buffer and its memory.
 		/// </summary>
 		void setUpRayLauncher();
@@ -191,29 +228,29 @@ namespace Aura::Core
 		/// <summary>
 		/// Prepares rays and hits layout, buffers and memory.
 		/// </summary>
-		void setUpRaysAndHits();
+		void setUpRaysState();
 		/// <summary>
 		/// Update rays and hits set. This isn't mutable, and should only be
 		/// used once.
 		/// </summary>
-		void updateRaysAndHitsSet();
+		void updateRaysState();
 		/// <summary>
 		/// Destroys the rays and hits layout, buffers and memory.
 		/// </summary>
-		void tearDownRaysAndHits();
+		void tearDownRaysState();
 		/// <summary>
-		/// Prepares pixels state layout, buffer and memory.
+		/// Prepares scene info layout, buffers and memory.
 		/// </summary>
-		void setUpPixelsState();
+		void setUpSceneInfo();
 		/// <summary>
-		/// Update pixels state set. This isn't mutable, and should only be
+		/// Update scene info set. This isn't mutable, and should only be
 		/// used once.
 		/// </summary>
-		void updatePixelsStateSet();
+		void updateSceneInfo();
 		/// <summary>
-		/// Destroys the pixels state layout, buffer and memory.
+		/// Destroys the scene info layout, buffers and memory.
 		/// </summary>
-		void tearDownPixelsState();
+		void tearDownSceneInfo();
 
 		// ------------------------------------------------------------------ //
 		// Pipelines.
@@ -226,6 +263,22 @@ namespace Aura::Core
 		/// Bulk tears-down all set-up pipelines.
 		/// </summary>
 		void tearDownPipelines();
+		/// <summary>
+		/// Prepares the pre-processing layout, shader module and pipeline.
+		/// </summary>
+		void setUpPreProcessPipeline();
+		/// <summary>
+		/// Destroys the pre-processing pipeline, layout 
+		/// </summary>
+		void tearDownPreProcessPipeline();
+		/// <summary>
+		/// Prepares the vertex layout, shader module and pipeline.
+		/// </summary>
+		void setUpVertexPipeline();
+		/// <summary>
+		/// Destroys the vertex pipeline, layout 
+		/// </summary>
+		void tearDownVertexPipeline();
 		/// <summary>
 		/// Prepares the ray generation layout, shader module and pipeline.
 		/// </summary>
@@ -243,21 +296,13 @@ namespace Aura::Core
 		/// </summary>
 		void tearDownIntersectPipeline();
 		/// <summary>
-		/// Prepares the colour layout, shader module and pipeline.
-		/// </summary>
-		void setUpColourPipeline();
-		/// <summary>
-		/// Destroys the colour pipeline, layout 
-		/// </summary>
-		void tearDownColourPipeline();
-		/// <summary>
 		/// Prepares the scatter layout, shader module and pipeline.
 		/// </summary>
-		void setUpScatterPipeline();
+		void setUpColourScatterPipeline();
 		/// <summary>
 		/// Destroys the scatter pipeline, layout 
 		/// </summary>
-		void tearDownScatterPipeline();
+		void tearDownColourScatterPipeline();
 		/// <summary>
 		/// Prepares the post-processing layout, shader module and pipeline.
 		/// </summary>

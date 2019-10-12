@@ -29,7 +29,7 @@ namespace Aura
 		{
 			// Random number generator, used in number retrieval form the distribution.
 			std::mt19937 random_number_generator;
-			// Uniform distribution of real numbers between [0, 1[.
+			// Uniform distribution of real numbers between [-1, 1[.
 			std::uniform_real_distribution<float> distribution;
 
 			// ------------------------------------------------------------------ //

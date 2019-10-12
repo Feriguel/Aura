@@ -13,6 +13,8 @@ add_executable(Test
 	"source/main.cpp"
 )
 add_executable(Aura::Test ALIAS Test)
+# Add subfolders.
+add_subdirectory("models")
 # Dependencies.
 target_link_libraries(Test 
 	PRIVATE

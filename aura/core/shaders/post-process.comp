@@ -5,47 +5,27 @@
 // ========================================================================== //
 #version 460
 // Workspace settings.
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-// Radius of pixels to average around target.
-#define AVG_RADIUS			1
-// Pixel colour output.
-struct Pixel { 
-	vec4 colour; 
-	uint bounces;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+// Layout bindings.
+layout(std140, set = 0, binding = 0) uniform Settings {
+	float t_min;
+	float t_max;
+	uint n_bounces;
+	uint n_samples;
+	uint n_primitives;
+	uint width;
+	uint height;
 };
-layout(std140, set = 0, binding = 0) buffer readonly Pixels {
-	Pixel[] pixels;
+layout(std140, set = 1, binding = 2) buffer restrict readonly Pixels {
+	vec4[] pixels;
 };
-// Output image.
-layout(rgba8, set = 1, binding = 0) uniform writeonly image2D frame;
+layout(rgba8, set = 2, binding = 0) uniform restrict image2D frame;
 
-// Outputs the image colour per pixel as the average between all the pixels
-// around a pre-set radius.
-vec4 avgColour(in const ivec2 pixel)
-{
-	// Calculate ranges.
-	const uint width = gl_WorkGroupSize.s * gl_NumWorkGroups.s;
-	const uint height = gl_WorkGroupSize.t * gl_NumWorkGroups.t;
-	const uint s_min = pixel.s - AVG_RADIUS < 0 ? 0 : pixel.s - AVG_RADIUS;
-	const uint s_max = width < pixel.s + AVG_RADIUS ? width : pixel.s + AVG_RADIUS;
-	const uint t_min = pixel.t - AVG_RADIUS < 0 ? 0 : pixel.t - AVG_RADIUS;
-	const uint t_max = height < pixel.t + AVG_RADIUS ? height : pixel.t + AVG_RADIUS;
-	// Determine average colour of grid.
-	vec4 colour = vec4(0.0);
-	const uint n_pixels = s_max - s_min + t_max - t_min;
-	for(uint s = s_min; s < s_max; ++s)
-	{
-		for(uint t = t_min; t < t_max; ++t)
-		{
-			const uint idx = s + s * t;
-			colour += pixels[idx].colour / (pixels[idx].bounces * n_pixels);
-		}
-	}
-	return colour;
-}
+// Updates image with an average of (AVG * 2 + 1) ^ 2 pixels /pixel.
 void main()
 {
+	if(gl_GlobalInvocationID.x > width || gl_GlobalInvocationID.y > height) { return; }
 	const ivec2 pixel = ivec2(gl_GlobalInvocationID.s, gl_GlobalInvocationID.t);
-	vec4 colour = avgColour(pixel);
-	imageStore(frame, pixel, colour);
+	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * width;
+	imageStore(frame, pixel, pixels[idx]/pixels[idx].a);
 }

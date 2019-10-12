@@ -5,103 +5,95 @@
 // ========================================================================== //
 #version 460
 // Workspace settings.
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-// Decimal cases helper ->	0.123456789012345
-#define MIN_PRECISION		0.0000001
-// Ray launcher.
-layout(std140, set = 0, binding = 0) uniform Launcher {
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+// Structures.
+struct Ray {
 	vec3 origin;
-	uint max_bounces;
-	vec3 corner;
+	vec3 direction;
+	vec3 albedo;
+	uint missed;
+};
+struct Hit {
+	vec3 point;
+	float time;
+	vec3 normal;
+	uint m_idx;
+	uint inside;
+};
+// Layout bindings.
+layout(std140, set = 0, binding = 0) uniform Settings {
+	float t_min;
+	float t_max;
+	uint n_bounces;
+	uint n_samples;
+	uint n_primitives;
+	uint width;
+	uint height;
+};
+layout(std140, set = 1, binding = 0) uniform Launcher {
+	vec3 origin;
 	float lens_radius;
+	vec3 corner;
 	vec3 horizontal;
 	vec3 vertical;
 	vec3 u;
 	vec3 v;
 	vec3 w;
 };
-// Rays and hits.
-struct Ray {
-	vec4 albedo;
-	vec3 origin;
-	uint bounces_left;
-	vec3 direction;
-};
-layout(std140, set = 1, binding = 0) buffer writeonly Rays {
+layout(std140, set = 2, binding = 0) buffer restrict writeonly Rays {
 	Ray[] rays;
 };
-struct Hit {
-	vec3 point;
-	float time;
-	vec3 normal;
-	uint object_idx;
-};
-layout(std140, set = 1, binding = 1) buffer writeonly Hits {
+layout(std140, set = 2, binding = 1) buffer restrict writeonly Hits {
 	Hit[] hits;
 };
-// Pixel state.
-struct Pixel { 
-	vec4 colour; 
-	uint bounces;
+layout(std140, set = 2, binding = 2) buffer restrict writeonly Pixels {
+	vec4[] pixels;
 };
-layout(std140, set = 2, binding = 0) buffer writeonly Pixels {
-	Pixel[] pixels;
+layout(push_constant) uniform Random { 
+	float seed;
 };
-// Offset randomiser.
-layout(push_constant) uniform Random {
-	float s;
-	float t;
-} random;
-
-// Determines the direction to pixel at workspace position from the origin of
-// the ray at idx. Directions with length below MIN_PRECISION return false.
-vec3 targetDirection(in const vec3 ray_o)
+// Input: It uses texture coords as the random number seed.
+// Output: Random number: [0,1), that is between 0.0 and 0.999999... inclusive.
+// Author: Michael Pohoreski
+// Copyright: Copyleft 2012 :-)
+// NOTE: This has been upgraded to version 3 !!
+float random( vec2 p )
 {
-	// Calculate target point (pixel coordinates).
-	const float s = float(gl_GlobalInvocationID.s) / float(gl_WorkGroupSize.s * gl_NumWorkGroups.s);
-	const float t = float(gl_GlobalInvocationID.t) / float(gl_WorkGroupSize.t * gl_NumWorkGroups.t);
-	const vec3 p = corner + s * horizontal + t * vertical;
-	// Calculate normalised direction.
-	const vec3 d = p - ray_o;
-	const float l = length(d);
-	if (l < MIN_PRECISION)
-	{
-		return vec3(0.0);
-	}
-	else
-	{
-		return d / l;
-	}
-}
-// Randomises a ray origin within the lens. Applies a deviation based on the
-// lens radius.
-vec3 lensOrigin()
-{
-	const vec3 offset = u * lens_radius * random.s + v * lens_radius * random.t;
-	return origin + offset;
+	// We need irrationals for pseudo randomness.
+	// Most (all?) known transcendental numbers will (generally) work.
+	const vec2 r = vec2(
+		23.1406926327792690,	// e^pi (Gelfond's constant)
+		2.6651441426902251		// 2^sqrt(2) (Gelfond–Schneider constant)
+	);
+	return fract( cos( mod( 123456789., 1e-7 + 256. * dot(p,r) ) ) );  
 }
 // Generates a ray for each workspace position and initialises the hit structures.
 // The work space should be the output image dimensions.
 void main()
 {
-	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.x * gl_GlobalInvocationID.y;
-	const vec3 ray_o = lensOrigin();
-	const vec3 ray_d = targetDirection(ray_o);
-	if(ray_d == vec3(0.0))
+	if(gl_GlobalInvocationID.x > width || gl_GlobalInvocationID.y > height) { return; }
+	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * width;
+	// Calculate target point (pixel coordinates).
+	const float s = float(gl_GlobalInvocationID.s) / width;
+	const float t = float(gl_GlobalInvocationID.t) / height;
+	// Randomize origin within the lens and set albedo.
+	const vec2 r = vec2(random(vec2(s,t)), random(vec2(s,t)) * seed);
+	const vec3 o = origin + u * lens_radius * r.s + v * lens_radius * r.t;
+	rays[idx].origin = o;
+	rays[idx].albedo = vec3(1.0, 1.0, 1.0);
+	// Calculate direction and length.
+	const vec3 d = corner + s * horizontal - t * vertical - o;
+	const float l = length(d);
+	// Set bounces left and direction if length is not 0.
+	if (l == 0)
 	{
-		rays[idx].bounces_left = 0;
+		rays[idx].missed = 1;
+		hits[idx].time = 0.0;
 	}
 	else
 	{
-		rays[idx].bounces_left = max_bounces;
+		rays[idx].missed = 0;
+		rays[idx].direction = d / l;
+		hits[idx].time = 0.0;
 	}
-	rays[idx].albedo = vec4(1.0, 1.0, 1.0, 1.0);
-	rays[idx].origin = ray_o;
-	rays[idx].direction = ray_d;
-	hits[idx].time = 0.0;
-	hits[idx].point = vec3(0.0);
-	hits[idx].normal = vec3(0.0);
-	hits[idx].object_idx = 0;
-	pixels[idx].colour = vec4(1.0, 0.0, 1.0, 1.0);
-	pixels[idx].bounces = 0;
 }

@@ -44,22 +44,18 @@ namespace Aura::Core
 		private:
 		// Holds the program render and render cycle.
 		Render render;
-		// Render frame counter guard.
-		std::mutex frame_guard;
 		public:
 		// Render frame counter.
 		std::uint32_t frame_counter;
 		private:
 		// Render frame counter limit.
 		std::uint32_t frame_limit;
-		// Render stop guard.
-		std::mutex stop_guard;
+		// Render frame counter guard.
+		std::mutex frame_guard;
 		// Rendering flag.
-		std::condition_variable stop_event;
-		// Render stop flag.
-		bool stop;
-		// Rendering cycle situation.
 		bool rendering;
+		// Rendering event flag guard.
+		std::mutex rendering_guard;
 
 		// All main modules can access the all nucleus parts.
 		friend class UI;
@@ -79,6 +75,14 @@ namespace Aura::Core
 		/// Stops rendering and tears-down the core.
 		/// </summary>
 		~Nucleus() noexcept;
+		/// <summary>
+		/// Restarts the renderer.
+		/// </summary>
+		void setUp(bool const window_reset, bool const device_reset);
+		/// <summary>
+		/// Restarts the renderer.
+		/// </summary>
+		void tearDown(bool const window_reset, bool const device_reset);
 
 		// ------------------------------------------------------------------ //
 		// Program control.
@@ -94,12 +98,6 @@ namespace Aura::Core
 		void run(std::uint32_t const max_frames = 0U);
 		private:
 		/// <summary>
-		/// Frame render cycle. Queries for changes in environment, and updates
-		/// the GPU is there are any changes. Then calls renderFrame to render
-		/// and display a new frame.
-		/// </summary>
-		void renderCycle();
-		/// <summary>
 		/// Resets the frame counter and updates the limit.
 		/// </summary>
 		void frameCounterReset(std::uint32_t const & max_frames) noexcept;
@@ -112,17 +110,17 @@ namespace Aura::Core
 		/// </summary>
 		void frameCounterIncrement() noexcept;
 		/// <summary>
-		/// Render thread start.
+		/// Checks rendering flag.
 		/// </summary>
-		void renderStart();
+		bool isRendering();
 		/// <summary>
-		/// Checks if render should stop.
+		/// Schedule a rendering job and set rendering flag to true.
 		/// </summary>
-		bool renderShouldStop() noexcept;
+		void renderFrame();
 		/// <summary>
-		/// Render thread stop.
+		/// Schedule a rendering job, wait for it to stop and outputs time.
 		/// </summary>
-		void renderStop() noexcept;
+		void renderWithTime();
 
 		// ------------------------------------------------------------------ //
 		// Nucleus update calls.
@@ -131,14 +129,14 @@ namespace Aura::Core
 		/// <summary>
 		/// Updates the debug settings.
 		/// </summary>
-		void updateDebugSettings(DebugSettings const & new_settings);
+		void updateDebugSettings(DebugSettings new_settings);
 		/// <summary>
 		/// Updates the display settings. 
 		/// Changing device require a render re-build, changing window mode or
 		/// it's dimensions requires an window reset and a render re-build.
 		/// Both changes might take some time.
 		/// </summary>
-		void updateDisplaySettings(DisplaySettings const & new_settings);
+		void updateDisplaySettings(DisplaySettings new_settings);
 		private:
 		/// <summary>
 		/// Loads saved display settings.

@@ -1,0 +1,96 @@
+// ========================================================================== //
+// File : intersect.comp
+//
+// Author : Miguel Ângelo Crespo Ferreira
+// ========================================================================== //
+#version 460
+// Workspace settings.
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+// Structures.
+struct Transform {
+	mat4 t;
+	mat4 s;
+	mat4 r;
+};
+struct Material { 
+	vec4 albedo;
+	uint type;
+	uint emissive;
+	float r_idx;
+	float fuzz;
+};
+struct Primitive {
+	uint type;
+	uint t_idx;
+	uint m_idx;
+	float radius;
+	uvec4 vertices;
+};
+// Layout bindings.
+layout(std140, set = 0, binding = 0) uniform Settings {
+	float t_min;
+	float t_max;
+	uint n_bounces;
+	uint n_samples;
+	uint n_primitives;
+	uint width;
+	uint height;
+};
+layout(std140, set = 1, binding = 0) buffer restrict readonly Vertices {
+	vec3[] vertices;
+};
+layout(std140, set = 1, binding = 1) buffer restrict readonly Transforms {
+	Transform[] transforms;
+};
+layout(std140, set = 1, binding = 2) buffer restrict readonly Materials {
+	Material[] materials;
+};
+layout(std140, set = 1, binding = 3) buffer restrict readonly Primitives {
+	Primitive[] primitives;
+};
+layout(std140, set = 1, binding = 4) buffer restrict writeonly U_Vertices {
+	vec3[] u_vertices;
+};
+// Primitive types:
+#define EMPTY		0
+#define SPHERE		1
+#define CUBOID		2
+#define TRIANGLE	3
+// Cycles trough all primitives and checks for intersections. Stores the closest
+// hit on the hit structure respective to the ray.
+void main()
+{
+	if(gl_GlobalInvocationID.x >= n_primitives) { return; }
+	const uint idx = gl_GlobalInvocationID.x;
+	const restrict Transform transform = transforms[primitives[idx].t_idx];
+	const uint offset = idx * 3;
+	switch(primitives[idx].type)
+	{
+		case SPHERE:
+		{
+			const mat4 trf = transform.t * transform.r;
+			u_vertices[offset] = vec3(trf * vec4(vertices[primitives[idx].vertices.x], 1.0));
+			const vec4 r_tmp = transform.s * vec4(primitives[idx].radius, primitives[idx].radius, primitives[idx].radius, 1.0);
+			u_vertices[offset + 1].x = (r_tmp.x + r_tmp.y + r_tmp.z) * 0.3333333;
+			return;
+		}
+		case CUBOID:
+		{
+			const mat4 trf = transform.t * transform.r * transform.s;
+			u_vertices[offset] = vec3(trf * vec4(vertices[primitives[idx].vertices.x], 1.0));
+			u_vertices[offset + 1] = vec3(trf * vec4(vertices[primitives[idx].vertices.y], 1.0));
+			return;
+		}
+		case TRIANGLE:
+		{
+			const mat4 trf = transform.t * transform.r * transform.s;
+			u_vertices[offset] = vec3(trf * vec4(vertices[primitives[idx].vertices.x], 1.0));
+			u_vertices[offset + 1] = vec3(trf * vec4(vertices[primitives[idx].vertices.y], 1.0));
+			u_vertices[offset + 2] = vec3(trf * vec4(vertices[primitives[idx].vertices.z], 1.0));
+			return;
+		}
+		default:
+			return;
+	}
+
+}

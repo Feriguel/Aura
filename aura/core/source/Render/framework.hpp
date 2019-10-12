@@ -184,25 +184,9 @@ namespace Aura::Core
 		/// optimal flags, or, if the optimal fail, the minimum required.
 		/// Throws any error that might occur.
 		/// </summary>
-		void allocateMemory(
-			vk::MemoryRequirements const & requirements,
-			vk::MemoryPropertyFlags const & optimal_properties,
-			vk::MemoryPropertyFlags const & required_properties,
-			vk::DeviceMemory & memory)
+		void allocateMemory(vk::DeviceSize const & size, std::uint32_t type_index, vk::DeviceMemory & memory)
 		{
-			vk::PhysicalDeviceMemoryProperties properties {};
-			physical_device.getMemoryProperties(&properties, dispatch);
-			std::uint32_t type_index { 0U };
-			if(!findMemoryType(properties, requirements, optimal_properties, type_index))
-			{
-				if(!findMemoryType(properties, requirements, required_properties, type_index))
-				{
-					std::string message { "Required memory(" };
-					message += vk::to_string(required_properties) + ") not found.";
-					throw std::exception(message.c_str());
-				}
-			}
-			vk::MemoryAllocateInfo const allocate_info { requirements.size, type_index };
+			vk::MemoryAllocateInfo const allocate_info { size, type_index };
 			vk::Result const result { device.allocateMemory(
 				&allocate_info, nullptr, &memory, dispatch) };
 			if(result != vk::Result::eSuccess)
@@ -291,22 +275,23 @@ namespace Aura::Core
 		// ------------------------------------------------------------------ //
 		// Helpers.
 		// ------------------------------------------------------------------ //
-		private:
+		public:
 		/// <summary>
 		/// Finds a memory with the given requirements and flags requirements.
 		/// </summary>
 		bool findMemoryType(
-			vk::PhysicalDeviceMemoryProperties const & memory_properties,
-			vk::MemoryRequirements const & requirements,
+			std::uint32_t const & required_type_bits,
 			vk::MemoryPropertyFlags const & required_properties,
 			std::uint32_t & type_index) const noexcept
 		{
-			std::uint32_t const memory_count = memory_properties.memoryTypeCount;
+			vk::PhysicalDeviceMemoryProperties properties {};
+			physical_device.getMemoryProperties(&properties, dispatch);
+			std::uint32_t const memory_count = properties.memoryTypeCount;
 			for(std::uint32_t i { 0U }; i < memory_count; ++i)
 			{
 				std::uint32_t const memory_type_bits { 1U << i };
-				bool const is_type { static_cast<bool>(requirements.memoryTypeBits & memory_type_bits) };
-				vk::MemoryPropertyFlags const flags { memory_properties.memoryTypes[i].propertyFlags };
+				bool const is_type { static_cast<bool>(required_type_bits & memory_type_bits) };
+				vk::MemoryPropertyFlags const flags { properties.memoryTypes[i].propertyFlags };
 				bool const is_fit = { (flags & required_properties) == required_properties };
 				if(is_type && is_fit)
 				{
@@ -316,6 +301,7 @@ namespace Aura::Core
 			}
 			return false;
 		}
+		private:
 		/// <summary>
 		/// Loads the shader at the given path.
 		/// </summary>

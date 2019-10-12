@@ -5,31 +5,249 @@
 // ========================================================================== //
 #version 460
 // Workspace settings.
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-// Decimal cases helper ->	0.123456789012345
-#define MIN_PRECISION		0.0000001
-// Rays and hits.
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+// Structures.
 struct Ray {
-	vec4 albedo;
 	vec3 origin;
-	uint bounces_left;
 	vec3 direction;
-};
-layout(std140, set = 0, binding = 0) buffer readonly Rays {
-	Ray[] rays;
+	vec3 albedo;
+	uint missed;
 };
 struct Hit {
 	vec3 point;
 	float time;
 	vec3 normal;
-	uint object_idx;
+	uint m_idx;
+	uint inside;
 };
-layout(std140, set = 0, binding = 1) buffer writeonly Hits {
+struct Transform {
+	mat4 t;
+	mat4 s;
+	mat4 r;
+};
+struct Primitive {
+	uint type;
+	uint t_idx;
+	uint m_idx;
+	float radius;
+	uvec4 vertices;
+};
+// Layout bindings.
+layout(std140, set = 0, binding = 0) uniform Settings {
+	float t_min;
+	float t_max;
+	uint n_bounces;
+	uint n_samples;
+	uint n_primitives;
+	uint width;
+	uint height;
+};
+layout(std140, set = 1, binding = 0) buffer restrict readonly Rays {
+	Ray[] rays;
+};
+layout(std140, set = 1, binding = 1) buffer restrict writeonly Hits {
 	Hit[] hits;
 };
-
-// Does nothing.
+layout(std140, set = 2, binding = 0) buffer restrict readonly Vertices {
+	vec3[] vertices;
+};
+layout(std140, set = 2, binding = 1) buffer restrict readonly Transforms {
+	Transform[] transforms;
+};
+layout(std140, set = 2, binding = 3) buffer restrict readonly Primitives {
+	Primitive[] primitives;
+};
+layout(std140, set = 2, binding = 4) buffer restrict readonly U_Vertices {
+	vec3[] u_vertices;
+};
+// Primitive types:
+#define EMPTY		0
+#define SPHERE		1
+#define CUBOID		2
+#define TRIANGLE	3
+// Cut-off value:	0.123456789012345
+#define CUT			0.0000010
+// Determines whenever a sphere is hit or not according to the equation:
+//		t*t*dot(D,D) + 2*t*dot(D,O-C) + dot(O-C,O-C) - R*R = 0
+// Where O is the ray origin, D the ray direction, C is the center of the
+// sphere, and R is the sphere radius.
+bool sphere(
+	in restrict const vec3 o, in restrict const vec3 d,
+	in restrict const vec3 v0, in restrict const float r,
+	out float t, out vec3 p, out vec3 n, out uint inside,
+	in const bool t_only)
+{
+	// Calculate quadratic constants.
+	const vec3 oc = o - v0;
+	const float a = dot(d, d);
+	const float b = 2.0 * dot(d, oc);
+	const float c = dot(oc, oc) - r * r;
+	const float descriminant = b * b - 4.0 * a * c;
+	// If descriminant is below cut point set return as miss.
+	if (descriminant < CUT) { return false; }
+	// Calculate both roots.
+	const float root = sqrt(descriminant);
+	const float div = 2.0 * a;
+	// Try negative root first, if below t_min use positive root.
+	t = (-b - root) / div;
+	bool inner = false;
+	if(t < t_min)
+	{
+		t = (-b + root) / div;
+		if(t < t_min) { return false; }
+		inner = true;
+	}
+	if(t > t_max) { return false; }
+	// Calculate point and normal.
+	if(t_only) { return true; }
+	p = o + t * d;
+	n = inner ? v0 - p : p - v0;
+	inside = uint(inner);
+	return true;
+}
+// Determines whenever a cuboid is hit or not by sequencially verifying the
+// intersection with composing planes. Rotations dont work with this implementation.
+bool cuboid(
+	in restrict const vec3 o, in restrict const vec3 d,
+	in restrict const vec3 v0, in restrict const vec3 v1,
+	out float t, out vec3 p, out vec3 n, out uint inside,
+	in const bool t_only)
+{
+	float tmp; vec3 t_mins, t_maxs, e0, e1;
+	// Calculate inverse of direction and all times.
+	const vec3 inv_d = 1.0 / d;
+	const vec3 tv0 = (v0 - o) * inv_d;
+	const vec3 tv1 = (v1 - o) * inv_d;
+	t_mins = tv0;
+	t_maxs = tv1;
+	// Check if the line intersects the cuboid between x and y areas.
+	if(inv_d.x < 0) { tmp = t_mins.x; t_mins.x = t_maxs.x; t_maxs.x = tmp; }
+	if(inv_d.y < 0) { tmp = t_mins.y; t_mins.y = t_maxs.y; t_maxs.y = tmp; }
+	if(t_mins.x > t_maxs.y || t_mins.y > t_maxs.x) { return false; }
+	if(t_mins.x > t_mins.y) { t_mins.y = t_mins.x; }
+	if(t_maxs.x < t_maxs.y) { t_maxs.y = t_maxs.x; }
+	// Check if previous intersection also intersects z area.
+	if(inv_d.z < 0) { tmp = t_mins.z; t_mins.z = t_maxs.z; t_maxs.z = tmp; }
+	if(t_mins.y > t_maxs.z || t_mins.z > t_maxs.y) { return false; }
+	if(t_mins.y > t_mins.z) { t_mins.z = t_mins.y; }
+	if(t_maxs.y < t_maxs.z) { t_maxs.z = t_maxs.y; }
+	// Choose minimum t and verify if over t_min.
+	bool inner = false;
+	if(t_maxs.z < t_min) { return false; }
+	if(t_mins.z < t_min)
+	{ inner = true; t = t_maxs.z; }
+	else
+	{ t = t_mins.z; }
+	if(t > t_max) { return false; }
+	// Calculate point and normal.
+	if(t_only) { return true; }
+	if(t == tv0.x)
+	{ e0 = v0 - vec3(v0.x, v1.y, v0.z); e1 = vec3(v0.xy, v1.z) - v0; }
+	else if(t == tv0.y)
+	{ e0 = v0 - vec3(v0.xy, v1.z); e1 = vec3(v0.x, v1.yz) - v0; }
+	else if(t == tv0.z)
+	{ e0 = v0 - vec3(v1.x, v0.yz); e1 = vec3(v0.x, v1.y, v0.z) - v0; }
+	else if(t == tv1.x)
+	{ e0 = v1 - vec3(v1.xy, v0.z); e1 = vec3(v1.x, v0.y, v1.z) - v1; }
+	else if(t == tv1.y)
+	{ e0 = v1 - vec3(v0.x, v1.yz); e1 = vec3(v1.xy, v0.z) - v1; }
+	else
+	{ e0 = v1 - vec3(v1.x, v0.y, v1.z); e1 = vec3(v0.x, v1.yz) - v1; }
+	p = o + t * d;
+	n = inner ? -cross(e0, e1) : cross(e0, e1);
+	inside = uint(inner);
+	return true;
+}
+// Determines whenever a triangle is hit or not using the Möller-Trumbore
+// intersection algorithm.
+// Output values are the time of intersection, the barycentric coords, the
+// point of intersection and the normal (not normalised).
+bool triangle(
+	in restrict const vec3 o, in restrict const vec3 d,
+	in restrict const vec3 v0, in restrict const vec3 v1,
+	in restrict const vec3 v2,
+	out float t, out vec3 p, out vec3 n, out uint inside,
+	in const bool t_only)
+{
+	// Build composing vectors.
+	const vec3 e1 = v1 - v0;
+	const vec3 e2 = v2 - v0;
+	// Calculate determinant and check if ray is parallel to the triangle.
+	const vec3 pvec = cross(d, e2);
+	const float det = dot(e1, pvec);
+	if(det > -CUT && det < CUT) { return false; }
+	const float inv_det = 1.0 / det;
+	// Calculate u parameter and test bounds.
+	const vec3 tvec = o - v0;
+	const float u = dot(tvec, pvec) * inv_det;
+	if(u < 0.0 || u > 1.0) { return false; }
+	// Calculate v parameter and test bounds.
+	const vec3 qvec = cross(tvec, e1);
+	const float v = dot(d, qvec) * inv_det;
+	if(v < 0.0 || u + v > 1.0) { return false; }
+	// Calculate t and verify if over t_min and below t_max.
+	t = dot(e2, qvec) * inv_det;
+	if(t < t_min) { return false; }
+	if(t > t_max) { return false; }
+	// Calculate point and normal.
+	if(t_only) { return true; }
+	bool inner = det < 0.0;
+	p = o + t * d;
+	n = inner ? cross(e2, e1) : cross(e1, e2);
+	inside = uint(inner);
+	return true;
+}
+// Cycles trough all primitives and checks for intersections. Stores the closest
+// hit on the hit structure respective to the ray.
 void main()
 {
+	if(gl_GlobalInvocationID.x > width || gl_GlobalInvocationID.y > height || gl_GlobalInvocationID.z >= n_primitives) { return; }
+	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * width;
+	if(bool(rays[idx].missed)) { return; }
 	
+	bool hit = false; Hit h = Hit(vec3(0.0), 0.0, vec3(0.0), 0, 0);
+	bool has_hit = false; Hit hf = Hit(vec3(0.0), t_max + CUT, vec3(0.0), 0, 0);
+	
+	for(uint i = 0; i < n_primitives; ++i)
+	{
+		const uint v_offset = i * 3;
+		h.m_idx = i;
+		// Cycle through all primitives.
+		switch(primitives[i].type)
+		{
+		case SPHERE:
+			hit = sphere(
+				rays[idx].origin, rays[idx].direction,
+				u_vertices[v_offset], u_vertices[v_offset + 1].x,
+				h.time, h.point, h.normal, h.inside, false);
+			break;
+		case CUBOID:
+			hit = cuboid(
+				rays[idx].origin, rays[idx].direction,
+				u_vertices[v_offset], u_vertices[v_offset + 1],
+				h.time, h.point, h.normal, h.inside, false);
+			break;
+		case TRIANGLE:
+			hit = triangle(
+				rays[idx].origin, rays[idx].direction,
+				u_vertices[v_offset], u_vertices[v_offset + 1],
+				u_vertices[v_offset + 2],
+				h.time, h.point, h.normal, h.inside, false);
+			break;
+		default:
+			hit = false;
+			break;
+		}
+		if(hit && h.time < hf.time)
+		{ has_hit = true; hf = h; }
+	}
+	// Update ray hit structure.
+	if(has_hit)
+	{
+		hits[idx].point = hf.point;
+		hits[idx].time = hf.time;
+		hits[idx].normal = normalize(hf.normal);
+		hits[idx].m_idx = primitives[hf.m_idx].m_idx;
+		hits[idx].inside = hf.inside;
+	}
 }

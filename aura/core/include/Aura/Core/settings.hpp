@@ -50,10 +50,16 @@ namespace Aura
 		/// </summary>
 		struct EnvLimits
 		{
-			// Maximum stored transforms.
-			static constexpr std::size_t limit_transforms { 5U };
 			// Maximum stored cameras.
-			static constexpr std::size_t limit_cameras { 5U };
+			static constexpr std::size_t limit_cameras { 10U };
+			// Maximum stored transforms and entities.
+			static constexpr std::size_t limit_entities { 10U };
+			// Maximum stored transforms.
+			static constexpr std::size_t limit_primitives { 2000U };
+			// Maximum stored materials.
+			static constexpr std::size_t limit_materials { 10U };
+			// Maximum stored vertices.
+			static constexpr std::size_t limit_vertices { 4000U };
 		};
 
 		// ------------------------------------------------------------------ //
@@ -86,9 +92,13 @@ namespace Aura
 			// Anti-aliasing additional samples, if not 0 randomizes each pixel
 			// output directions on each sample and adds results. If 0 AA is off
 			// gen rays direction is fixed.
-			std::uint32_t anti_aliasing { 4U };
+			std::uint32_t anti_aliasing { 2U };
 			// Maximum bounces allowed for each ray.
-			std::uint32_t ray_depth { 4U };
+			std::uint32_t ray_depth { 5U };
+			// Minimum ray lifetime.
+			float t_min { 0.0000001f };
+			// Maximum ray lifetime (0.0f is infinite).
+			float t_max { 1000.0f };
 		};
 	}
 }

@@ -38,7 +38,7 @@ namespace Aura
 			// Thread pool.
 			std::vector<std::thread> pool;
 			// Thread event flag.
-			std::condition_variable event_flag;
+			std::condition_variable event_trigger;
 			// Thread event flag guard.
 			std::mutex event_guard;
 			// Stop flag.
@@ -68,7 +68,7 @@ namespace Aura
 					std::unique_lock<std::mutex> lock { event_guard };
 					stopping = true;
 				}
-				event_flag.notify_all();
+				event_trigger.notify_all();
 				for(auto & thread : pool)
 				{ thread.join(); }
 			}
@@ -88,7 +88,7 @@ namespace Aura
 					std::unique_lock<std::mutex> lock { event_guard };
 					tasks.emplace([=] { (*wrapper)(); });
 				}
-				event_flag.notify_one();
+				event_trigger.notify_one();
 				return wrapper->get_future();
 			}
 			/// <summary>
@@ -113,7 +113,7 @@ namespace Aura
 					Task task {};
 					{
 						std::unique_lock<std::mutex> lock { event_guard };
-						event_flag.wait(lock, [&] { return stopping || !tasks.empty(); });
+						event_trigger.wait(lock, [&] { return stopping || !tasks.empty(); });
 						if(stopping && tasks.empty()) { break; }
 						task = std::move(tasks.front());
 						tasks.pop();

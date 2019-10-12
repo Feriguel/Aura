@@ -21,6 +21,9 @@
 #define VULKAN_HPP_NO_SMART_HANDLE
 #include <vulkan/vulkan.hpp>
 #pragma warning(default : 26495)
+#pragma warning(disable : 26812)
+#include <glm/vec3.hpp>
+#pragma warning(default : 26812)
 
 namespace Aura::Core
 {
@@ -28,6 +31,9 @@ namespace Aura::Core
 	class Nucleus;
 	// Ray tracing framework.
 	class RayTracer;
+	// Push random values.
+	struct RandomSeed;
+	struct RandomPointInCircleAndSeed;
 	/// <summary>
 	/// Englobes the queue and its respective family index.
 	/// </summary>
@@ -37,27 +43,17 @@ namespace Aura::Core
 		vk::Queue queue {};
 	};
 	/// <summary>
-	/// Work type buffer indices and buffer count.
+	/// Joins all necessary elements required for a single thread to build each
+	/// job dispatch.
 	/// </summary>
-	struct WorkTypes
-	{
-		static constexpr std::uint32_t n { 4U };
-		static constexpr std::uint32_t ray_gen { 0U };
-		static constexpr std::uint32_t intersect { 1U };
-		static constexpr std::uint32_t colour { 2U };
-		static constexpr std::uint32_t scatter { 3U };
-	};
-	/// <summary>
-	/// Joins all necessary elements required for a single thread to build dispatch.
-	/// </summary>
-	struct SampleDispatch
+	struct DispatchJobs
 	{
 		// Thread compute command pool.
 		vk::CommandPool c_pool {};
 		// Thread compute command buffers.
-		std::array<vk::CommandBuffer, WorkTypes::n> c_buffers {};
+		vk::CommandBuffer c_buffer {};
 		// Thread compute command semaphores.
-		std::array<vk::Semaphore, WorkTypes::n> c_semaphores {};
+		vk::Semaphore c_semaphore {};
 	};
 	/// <summary>
 	/// Program render and render cycle. Uses a vulkan compute ray tracer as a
@@ -90,15 +86,11 @@ namespace Aura::Core
 		// Permanent shader flags.
 		std::array<vk::PipelineStageFlags, 4> const stage_flags;
 		// Dispatch structures for each thread.
-		std::vector<SampleDispatch> sample_dispatches;
-		// Render thread compute command pool.
-		vk::CommandPool c_pool;
-		// Main tasks compute command buffer.
-		std::array<vk::CommandBuffer, 3U> c_buffers;
-		// Main tasks semaphores.
-		std::array<vk::Semaphore, 3U> main_semaphores;
+		std::vector<DispatchJobs> dispatch_jobs;
 		// Render fence.
 		vk::Fence main_fence;
+		// Frame acquisition semaphore.
+		vk::Semaphore acquisition_semaphore {};
 
 		// ------------------------------------------------------------------ //
 		// Set-up and tear-down.
@@ -120,45 +112,52 @@ namespace Aura::Core
 		/// <summary>
 		/// Renders and presents new frame.
 		/// </summary>
-		bool renderFrame();
-		/// <summary>
-		/// Checks for any updates in the environment and clones the new states
-		/// to the GPU. Given jobs array must be empty. Checks if all jobs are valid.
-		/// </summary>
-		void updateEnvironment(std::uint32_t const & frame_idx) const;
-		/// <summary>
-		/// Submits a layout change to general for the frame at the given index.
-		/// This task is submitted without any kind of fence.
-		/// </summary>
-		void updateImageLayoutToGeneral(std::uint32_t const & frame_idx) const;
-		/// <summary>
-		/// Renders all image samples by dispatching a thread for each sample
-		/// command record. This will generate all rays, process them and, at
-		/// the end, schedule a post-process.
-		/// </summary>
-		void renderImage() const;
-		/// <summary>
-		/// Submits a layout change to present for the frame at the given index.
-		/// This task is submitted with the main fence, which should be waited.
-		/// </summary>
-		void updateImageLayoutToPresent(std::uint32_t const & frame_idx) const;
-		/// <summary
-		/// Waits for the main fence until all its tasks are finished.
-		/// </summary>
-		void waitForMainFence() const;
+		bool dispatchFrame();
 		/// <summary
 		/// Waits for the device to complete all it's given tasks, must be used
 		/// before destroying any of the tear-down functions.
 		/// </summary>
 		void waitIdle() const noexcept;
 		/// <summary>
-		/// Randomizes a value limited to a circle with 1 unit radius.
+		/// Waits for the main fence until all its tasks are finished.
 		/// </summary>
-		float randomInCircle() const;
+		bool waitForMainFence(std::uint64_t timeout) const;
+		private:
+		/// <summary>
+		/// Checks for any updates in the environment and clones the new states
+		/// to the GPU. Waits for any required work to finish.
+		/// </summary>
+		bool updateEnvironment(std::uint32_t const & frame_idx) const;
+		/// <summary>
+		/// Records and submits all necessary commands to render the image in
+		/// the current settings.
+		/// </summary>
+		void dispatchFrameJobs(std::uint32_t const & frame_idx, bool const & update) const;
 
 		// ------------------------------------------------------------------ //
-		// Command creation.
+		// Command recording and submission schedule.
 		// ------------------------------------------------------------------ //
+		private:
+		/// <summary>
+		/// Builds the entire submit info as necessary for queue submission.
+		/// </summary>
+		void dispatchSubmitInfo(const std::size_t n_submits, std::vector<vk::SubmitInfo> & submits) const;
+		/// <summary>
+		/// Records the layout transition to geral to a initial submission.
+		/// </summary>
+		void recordPreProcess(std::uint32_t const frame_idx, bool const update) const;
+		/// <summary>
+		/// Records a sample sequence in the buffer associated with the sample
+		/// index. Each sequence includes a ray-generation and x sets of 
+		/// intersect, colour and scatter, in this order, equal to the maximum
+		/// depth.
+		/// </summary>
+		void recordSample(bool const is_random, std::size_t const sample_idx) const;
+		/// <summary>
+		/// Records both the post-process and the layout transition, in this order,
+		/// to the same submission.
+		/// </summary>
+		void recordPostProcess(std::uint32_t const frame_idx) const;
 		/// <summary>
 		/// Starts the command buffer record operation.
 		/// </summary>
@@ -170,50 +169,17 @@ namespace Aura::Core
 		/// </summary>
 		void endRecord(vk::CommandBuffer const & command) const;
 		/// <summary>
-		/// Builds a sample submission, and must only be called by a pool thread.
-		/// Returns either a list of submissions or an empty list if the previous
-		/// submission is still on going. In this case the record should enqueued
-		/// again.
+		/// Randomizes a value limited to a circle with 1 unit radius.
 		/// </summary>
-		std::array<vk::SubmitInfo, WorkTypes::n> const recordSample(bool const is_random, std::uint32_t const sample_idx) const;
+		glm::vec3 randomInCircle() const;
 		/// <summary>
-		/// Records the ray generation command buffer and the builds the submit
-		/// info according to the to conditions given. Upon completion signals
-		/// the thread corresponding work semaphore.
+		/// Fills structure with sets of random vectors within a circle.
 		/// </summary>
-		void recordRayGenerationStage(SampleDispatch const & sample, std::uint32_t const n_wait,
-			vk::Semaphore const * p_wait, bool const & is_random, vk::SubmitInfo & submit) const;
+		void fillRandomsWithinCircle(RandomPointInCircleAndSeed & randoms) const;
 		/// <summary>
-		/// Records the intersect stage command buffer and the builds the submit
-		/// info. Upon completion signals the thread corresponding work semaphore.
+		/// Fills structure with generated values.
 		/// </summary>
-		void recordIntersectStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const;
-		/// <summary>
-		/// Records the colour stage command buffer and the builds the submit
-		/// info. Upon completion signals the thread corresponding work semaphore.
-		/// </summary>
-		void recordColourStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const;
-		/// <summary>
-		/// Records the scatter stage command buffer and the builds the submit
-		/// info. Upon completion signals the thread corresponding work semaphore.
-		/// </summary>
-		void recordScatterStage(SampleDispatch const & sample, vk::SubmitInfo & submit) const;
-		/// <summary>
-		/// Records the post-process command buffer and the builds the submit
-		/// info. This task signal semaphore is the second main semaphore.
-		/// </summary>
-		void recordPostProcessStage(vk::CommandBuffer const & buffer,
-			std::uint32_t const n_wait, vk::Semaphore const * p_wait, vk::SubmitInfo & submit) const;
-		/// <summary>
-		/// Records layout transition of the frame at the given index to general.
-		/// </summary>
-		void recordGeneralTransition(vk::CommandBuffer const & buffer,
-			std::uint32_t const frame_idx, vk::SubmitInfo & submit) const;
-		/// <summary>
-		/// Records layout transition of the frame at the given index to present.
-		/// </summary>
-		void recordPresentTransition(vk::CommandBuffer const & buffer,
-			std::uint32_t const frame_idx, vk::SubmitInfo & submit) const;
+		void fillRandoms(RandomSeed & randoms) const;
 
 		// ------------------------------------------------------------------ //
 		// Vulkan set-up and tear-down related.
