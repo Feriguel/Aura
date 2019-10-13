@@ -60,7 +60,7 @@ layout(push_constant) uniform Random {
 #define DIFFUSE    2
 #define SPECULAR   3
 // Minimum distance from origin:	0.123456789012345
-#define MIN_DIST					0.0000001
+#define MIN_DIST					0.0000005
 // Updates ray direction by reflecting the previous ray over the surface of
 // the intersected material.
 vec3 reflection(
@@ -107,13 +107,12 @@ vec3 refraction(
 }
 // Adds the background to the pixel colour. Currently determines a colour in
 // a gradient between azure and white using the vertical ratio of the ray direction.
-vec4 miss(
-	in restrict const vec3 d, in restrict const vec3 albedo)
+vec3 miss(in restrict const vec3 d)
 {
 	const float vr = (d.y + 1.0) * 0.5;
-	const vec3 sky = vec3(0.25, 0.25, 0.25) * (1.0 - vr);
-	const vec3 darkness = vec3(0.2, 0.6, 1.0) * vr;
-	return vec4((darkness + sky) * albedo, 1.0);
+	const vec3 darkness = vec3(0.25, 0.25, 0.25) * (1.0 - vr);
+	const vec3 sky = vec3(0.2, 0.6, 1.0) * vr;
+	return darkness + sky;
 }
 // Determines the colour based on the hit material type and alpha component.
 // Alphas below 1.0 are translucent. Only emissive materials add to the colour.
@@ -166,8 +165,8 @@ vec4 hit_translucent(
 // Determines the ray colour and scatters it, if it ain't a miss.
 void main()
 {
-	if(gl_GlobalInvocationID.x > width || gl_GlobalInvocationID.y > height) { return; }
-	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * width;
+	if(gl_GlobalInvocationID.s > width || gl_GlobalInvocationID.t > height) { return; }
+	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t * width;
 	if(bool(rays[idx].missed)) { return; }
 	vec3 nd = vec3(0.0);
 	bool refracted = false;
@@ -176,7 +175,7 @@ void main()
 	// If its a miss.
 	if(hits[idx].time == 0.0)
 	{
-		pixels[idx] += miss(rays[idx].direction, rays[idx].albedo);
+		pixels[idx] += vec4(miss(rays[idx].direction) * rays[idx].albedo, 1.0);
 		rays[idx].missed = 1; 
 		return;
 	}
@@ -187,10 +186,10 @@ void main()
 		materials[hits[idx].m_idx].type, materials[hits[idx].m_idx].emissive,
 		materials[hits[idx].m_idx].albedo.rgb, materials[hits[idx].m_idx].albedo.a);
 		
-		nd = refraction(
-			hits[idx].normal, rays[idx].direction,
+		nd = refraction(hits[idx].normal, rays[idx].direction,
 			materials[hits[idx].m_idx].type, materials[hits[idx].m_idx].r_idx,
 			hits[idx].inside);
+		
 		if(nd != vec3(0.0))
 		{
 			refracted = true;
@@ -204,8 +203,7 @@ void main()
 	}
 	if (!bool(materials[hits[idx].m_idx].emissive) && !refracted)
 	{
-		nd = reflection(
-			hits[idx].normal, rays[idx].direction,
+		nd = reflection(hits[idx].normal, rays[idx].direction,
 			materials[hits[idx].m_idx].type, materials[hits[idx].m_idx].fuzz);
 	}
 	if(bool(materials[hits[idx].m_idx].emissive))
@@ -219,14 +217,14 @@ void main()
 	}
 	else if(nd == vec3(0.0))
 	{
-		rays[idx].origin = hits[idx].point;
+		rays[idx].origin = hits[idx].point + MIN_DIST * rays[idx].direction;
 		hits[idx].time = 0.0;
 		return;
 	}
 	else
 	{
-		rays[idx].origin = hits[idx].point + MIN_DIST * nd;
 		rays[idx].direction = normalize(nd);
+		rays[idx].origin = hits[idx].point + MIN_DIST * rays[idx].direction;
 		rays[idx].albedo = vec3(albedo);
 		hits[idx].time = 0.0;
 	}

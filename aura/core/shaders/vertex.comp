@@ -76,9 +76,8 @@ void main()
 		}
 		case CUBOID:
 		{
-			const mat4 trf = transform.t * transform.r * transform.s;
-			u_vertices[offset] = vec3(trf * vec4(vertices[primitives[idx].vertices.x], 1.0));
-			u_vertices[offset + 1] = vec3(trf * vec4(vertices[primitives[idx].vertices.y], 1.0));
+			u_vertices[offset] = vertices[primitives[idx].vertices.x];
+			u_vertices[offset + 1] = vertices[primitives[idx].vertices.y];
 			return;
 		}
 		case TRIANGLE:

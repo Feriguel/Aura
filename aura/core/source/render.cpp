@@ -294,7 +294,7 @@ namespace Aura::Core
 		{
 			rand = glm::vec3(core_nucleus.gen(), core_nucleus.gen(), core_nucleus.gen());
 		}
-		while(glm::dot(rand, rand) >= 1.0);
+		while(glm::dot(rand, rand) > 1.0);
 		return rand;
 	}
 	/// <summary>
@@ -302,7 +302,7 @@ namespace Aura::Core
 	/// </summary>
 	void Render::fillRandomsWithinCircle(RandomPointInCircleAndSeed & randoms) const
 	{
-		randoms.point = std::move(randomInCircle());
+		randoms.point = randomInCircle();
 		randoms.seed = core_nucleus.gen();
 	}
 	/// <summary>

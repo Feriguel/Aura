@@ -21,11 +21,11 @@ layout(std140, set = 1, binding = 2) buffer restrict readonly Pixels {
 };
 layout(rgba8, set = 2, binding = 0) uniform restrict image2D frame;
 
-// Updates image with an average of (AVG * 2 + 1) ^ 2 pixels /pixel.
+// Update image.
 void main()
 {
-	if(gl_GlobalInvocationID.x > width || gl_GlobalInvocationID.y > height) { return; }
+	if(gl_GlobalInvocationID.s > width || gl_GlobalInvocationID.t > height) { return; }
 	const ivec2 pixel = ivec2(gl_GlobalInvocationID.s, gl_GlobalInvocationID.t);
-	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * width;
+	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t * width;
 	imageStore(frame, pixel, pixels[idx]/pixels[idx].a);
 }

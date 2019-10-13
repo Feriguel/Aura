@@ -45,7 +45,7 @@ layout(std140, set = 0, binding = 0) uniform Settings {
 layout(std140, set = 1, binding = 0) buffer restrict readonly Rays {
 	Ray[] rays;
 };
-layout(std140, set = 1, binding = 1) buffer restrict writeonly Hits {
+layout(std140, set = 1, binding = 1) buffer restrict Hits {
 	Hit[] hits;
 };
 layout(std140, set = 2, binding = 0) buffer restrict readonly Vertices {
@@ -66,7 +66,7 @@ layout(std140, set = 2, binding = 4) buffer restrict readonly U_Vertices {
 #define CUBOID		2
 #define TRIANGLE	3
 // Cut-off value:	0.123456789012345
-#define CUT			0.0000010
+#define CUT			0.0000001
 // Determines whenever a sphere is hit or not according to the equation:
 //		t*t*dot(D,D) + 2*t*dot(D,O-C) + dot(O-C,O-C) - R*R = 0
 // Where O is the ray origin, D the ray direction, C is the center of the
@@ -201,17 +201,15 @@ bool triangle(
 // hit on the hit structure respective to the ray.
 void main()
 {
-	if(gl_GlobalInvocationID.x > width || gl_GlobalInvocationID.y > height || gl_GlobalInvocationID.z >= n_primitives) { return; }
-	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * width;
+	if(gl_GlobalInvocationID.s > width || gl_GlobalInvocationID.t > height) { return; }
+	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t * width;
 	if(bool(rays[idx].missed)) { return; }
-	
-	bool hit = false; Hit h = Hit(vec3(0.0), 0.0, vec3(0.0), 0, 0);
-	bool has_hit = false; Hit hf = Hit(vec3(0.0), t_max + CUT, vec3(0.0), 0, 0);
 	
 	for(uint i = 0; i < n_primitives; ++i)
 	{
 		const uint v_offset = i * 3;
-		h.m_idx = i;
+		bool hit = false;
+		Hit h = Hit(vec3(0.0), 0.0, vec3(0.0), 0, 0);
 		// Cycle through all primitives.
 		switch(primitives[i].type)
 		{
@@ -238,16 +236,28 @@ void main()
 			hit = false;
 			break;
 		}
-		if(hit && h.time < hf.time)
-		{ has_hit = true; hf = h; }
+		if(hit)
+		{ 
+			if(hits[idx].time == 0.0)
+			{
+				hits[idx].point = h.point;
+				hits[idx].time = h.time;
+				hits[idx].normal = h.normal;
+				hits[idx].m_idx = primitives[i].m_idx;
+				hits[idx].inside = h.inside;
+			}
+			else if(h.time < hits[idx].time)
+			{
+				hits[idx].point = h.point;
+				hits[idx].time = h.time;
+				hits[idx].normal = h.normal;
+				hits[idx].m_idx = primitives[i].m_idx;
+				hits[idx].inside = h.inside;
+			}
+		}
 	}
-	// Update ray hit structure.
-	if(has_hit)
+	if(hits[idx].time != 0.0)
 	{
-		hits[idx].point = hf.point;
-		hits[idx].time = hf.time;
-		hits[idx].normal = normalize(hf.normal);
-		hits[idx].m_idx = primitives[hf.m_idx].m_idx;
-		hits[idx].inside = hf.inside;
+		hits[idx].normal = normalize(hits[idx].normal);
 	}
 }

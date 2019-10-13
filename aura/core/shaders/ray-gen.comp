@@ -50,7 +50,7 @@ layout(std140, set = 2, binding = 2) buffer restrict writeonly Pixels {
 	vec4[] pixels;
 };
 layout(push_constant) uniform Random { 
-	float seed;
+	vec2 r;
 };
 // Input: It uses texture coords as the random number seed.
 // Output: Random number: [0,1), that is between 0.0 and 0.999999... inclusive.
@@ -71,13 +71,12 @@ float random( vec2 p )
 // The work space should be the output image dimensions.
 void main()
 {
-	if(gl_GlobalInvocationID.x > width || gl_GlobalInvocationID.y > height) { return; }
-	const uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * width;
+	if(gl_GlobalInvocationID.s > width || gl_GlobalInvocationID.t > height) { return; }
+	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t * width;
 	// Calculate target point (pixel coordinates).
 	const float s = float(gl_GlobalInvocationID.s) / width;
 	const float t = float(gl_GlobalInvocationID.t) / height;
 	// Randomize origin within the lens and set albedo.
-	const vec2 r = vec2(random(vec2(s,t)), random(vec2(s,t)) * seed);
 	const vec3 o = origin + u * lens_radius * r.s + v * lens_radius * r.t;
 	rays[idx].origin = o;
 	rays[idx].albedo = vec3(1.0, 1.0, 1.0);

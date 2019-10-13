@@ -41,19 +41,12 @@ namespace Aura::Test
 	/// </summary>
 	class CoreEnv : public ::testing::Test
 	{
-		protected:
+	protected:
 		// Core nucleus instance.
 		static inline Core::Nucleus * core = nullptr;
 		// Per-test-suite set-up.
 		// Called before the first test in this test suite.
 		static void SetUpTestSuite()
-		{}
-		// Per-test-suite tear-down.
-		// Called after the last test in this test suite.
-		static void TearDownTestSuite()
-		{}
-		// Per-test set-up logic.
-		void SetUp() override
 		{
 			std::string const app_name { "Test [π]" };
 			std::uint16_t constexpr app_major { 1U };
@@ -61,11 +54,18 @@ namespace Aura::Test
 			std::uint16_t constexpr app_patch { 0U };
 			core = new Core::Nucleus(app_name, app_major, app_minor, app_patch);
 		}
-		// Per-test tear-down logic.
-		void TearDown() override
+		// Per-test-suite tear-down.
+		// Called after the last test in this test suite.
+		static void TearDownTestSuite()
 		{
 			delete core;
 		}
+		// Per-test set-up logic.
+		void SetUp() override
+		{}
+		// Per-test tear-down logic.
+		void TearDown() override
+		{}
 	};
 
 	// ------------------------------------------------------------------ //
@@ -76,7 +76,7 @@ namespace Aura::Test
 		std::uint32_t m_idx { 0U };
 		std::uint32_t v_idx { 0U };
 		std::uint32_t e_idx { 0U };
-		
+
 		// Floor
 		{
 			Core::Primitive primitive
@@ -88,9 +88,9 @@ namespace Aura::Test
 			Core::Vertex v1 { glm::vec3(2.1f, -2.0f, 2.1f) };
 			Core::Material material
 			{
-				glm::vec4(0.9f, 0.9f, 0.9f, 0.2f),
-				Core::Material::Types::Diffuse,
-				0, 1.3f, 0.25f
+				glm::vec4(0.9f, 0.9f, 0.9f, 2.0f),
+				Core::Material::Types::Specular,
+				1, 1.3f, 0.0f
 			};
 			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
 			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
@@ -111,9 +111,9 @@ namespace Aura::Test
 			Core::Vertex v1 { glm::vec3(2.1f, 2.1f, 2.1f) };
 			Core::Material material
 			{
-				glm::vec4(0.9f, 0.9f, 0.9f, 0.2f),
-				Core::Material::Types::Diffuse,
-				0, 1.3f, 0.25f
+				glm::vec4(0.9f, 0.9f, 0.9f, 1.0f),
+				Core::Material::Types::Specular,
+				0, 1.3f, 0.0f
 			};
 			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
 			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
@@ -123,86 +123,32 @@ namespace Aura::Test
 			primitive.vertices.y = v_idx;
 			ASSERT_TRUE(core->environment.entityAddPrimitive(e_idx, primitive));
 		}
-		// Back
+		// Cube
 		{
-			Core::Primitive primitive
-			{
-				Core::Primitive::Types::Cuboid, 0U, 0U, 0.0f,
-				glm::uvec4(0U, 0U, 0U, 0U)
-			};
-			Core::Vertex v0 { glm::vec3(-2.1f, 2.0f, -2.1f) };
-			Core::Vertex v1 { glm::vec3(2.1f, 2.1f, 2.1f) };
 			Core::Material material
 			{
-				glm::vec4(0.9f, 0.9f, 0.9f, 0.2f),
+				glm::vec4(0.9f, 0.1f, 0.1f, 1.0f),
 				Core::Material::Types::Diffuse,
-				0, 1.3f, 0.25f
+				0, 1.3f, 0.5f
 			};
 			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
 			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
-			ASSERT_TRUE(core->environment.newVertex(v0, v_idx));
-			primitive.vertices.x = v_idx;
-			ASSERT_TRUE(core->environment.newVertex(v1, v_idx));
-			primitive.vertices.y = v_idx;
-			ASSERT_TRUE(core->environment.entityAddPrimitive(e_idx, primitive));
-		}
-		// Roof
-		{
-			Core::Primitive primitive
-			{
-				Core::Primitive::Types::Cuboid, 0U, 0U, 0.0f,
-				glm::uvec4(0U, 0U, 0U, 0U)
-			};
-			Core::Vertex v0 { glm::vec3(-2.1f, 2.0f, -2.1f) };
-			Core::Vertex v1 { glm::vec3(2.1f, 2.1f, 2.1f) };
-			Core::Material material
-			{
-				glm::vec4(0.9f, 0.9f, 0.9f, 0.2f),
-				Core::Material::Types::Diffuse,
-				0, 1.3f, 0.25f
-			};
-			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
-			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
-			ASSERT_TRUE(core->environment.newVertex(v0, v_idx));
-			primitive.vertices.x = v_idx;
-			ASSERT_TRUE(core->environment.newVertex(v1, v_idx));
-			primitive.vertices.y = v_idx;
-			ASSERT_TRUE(core->environment.entityAddPrimitive(e_idx, primitive));
-		}
-		// Roof
-		{
-			Core::Primitive primitive
-			{
-				Core::Primitive::Types::Cuboid, 0U, 0U, 0.0f,
-				glm::uvec4(0U, 0U, 0U, 0U)
-			};
-			Core::Vertex v0 { glm::vec3(-2.1f, 2.0f, -2.1f) };
-			Core::Vertex v1 { glm::vec3(2.1f, 2.1f, 2.1f) };
-			Core::Material material
-			{
-				glm::vec4(0.9f, 0.9f, 0.9f, 0.2f),
-				Core::Material::Types::Diffuse,
-				0, 1.3f, 0.25f
-			};
-			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
-			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
-			ASSERT_TRUE(core->environment.newVertex(v0, v_idx));
-			primitive.vertices.x = v_idx;
-			ASSERT_TRUE(core->environment.newVertex(v1, v_idx));
-			primitive.vertices.y = v_idx;
-			ASSERT_TRUE(core->environment.entityAddPrimitive(e_idx, primitive));
+			ASSERT_TRUE(core->environment.entityLoadModel(e_idx, "models/cube.obj"));
+			core->environment.entityScale(e_idx, glm::vec3(0.75f, 0.75f, 0.75f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.5f, 0.0f, 0.5f));
+			core->environment.entityRotate(e_idx, glm::vec3(0.5f, 0.5f, 5.0f));
 		}
 	}
-	TEST_F(CoreEnv, SixtyFrameLoop)
+	TEST_F(CoreEnv, PrimarySixtyFrameLoop)
 	{
 		{
 			std::shared_lock<std::shared_mutex> scene_lock(core->environment.guard);
 			{
 				std::unique_lock<std::mutex> camera_lock(core->environment.scene->camera.guard);
-				core->environment.scene->camera.data.look_from = glm::vec3(0.0f, 0.0f, -2.0f);
+				core->environment.scene->camera.data.look_from = glm::vec3(0.0f, 0.0f, 4.0f);
 				core->environment.scene->camera.data.look_at = glm::vec3(0.0f, 0.0f, 0.0f);
 				core->environment.scene->camera.data.v_up = glm::vec3(0.0f, 1.0f, 0.0f);
-				core->environment.scene->camera.data.aperture = 0.0f;
+				core->environment.scene->camera.data.aperture = 0.001f;
 				core->environment.scene->camera.data.focus = 1.0f;
 				core->environment.scene->camera.updated = true;
 			}
@@ -210,39 +156,14 @@ namespace Aura::Test
 		core->run(60U);
 		ASSERT_TRUE(core->frame_counter >= 60U);
 	}
-	/*
-	TEST_F(CoreEnv, ReplaceScene)
+	TEST_F(CoreEnv, SecondarySixtyFrameLoop)
 	{
-		core->environment.replaceScene(new Core::Scene());
+		core->run(60U);
 	}
-	*/
-	/*
-	TEST_F(CoreEnv, LoadModel)
+	TEST_F(CoreEnv, InfLoop)
 	{
-		{
-			std::shared_lock<std::shared_mutex> scene_lock(core->environment.guard);
-			{
-				std::unique_lock<std::mutex> camera_lock(core->environment.scene->camera.guard);
-				core->environment.scene->camera.data.look_from = glm::vec3(0.0f, 0.0f, 3.0f);
-				core->environment.scene->camera.data.look_at = glm::vec3(0.0f, 0.0f, 0.0f);
-				core->environment.scene->camera.data.v_up = glm::vec3(0.0f, 1.0f, 0.0f);
-				core->environment.scene->camera.data.aperture = 0.0f;
-				core->environment.scene->camera.data.focus = 1.0f;
-				core->environment.scene->camera.updated = true;
-			}
-		}
-		std::uint32_t m_idx { 0U };
-		std::uint32_t e_idx { 0U };
-		{
-			Core::Material material {
-				glm::vec4(0.6f, 0.3f, 0.3f, 1.0f), Core::Material::Types::Diffuse, 0, 1.3f, 0.0f };
-			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
-			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
-			ASSERT_TRUE(core->environment.entityLoadModel(e_idx, "models/suzanne.obj"));
-		}
 		core->run();
 	}
-	*/
 }
 
 /// <summary>
