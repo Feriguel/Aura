@@ -58,13 +58,11 @@ namespace Aura
 			/// Enumeration of material types.
 			/// </summary>
 			enum struct Types : std::uint32_t
-			{ Bounding = 0U, Test = 1U, Diffuse = 2U, Specular = 3U };
-			// Material colour, alpha channel determines transparency.
-			glm::vec4 albedo { 0.0f, 0.0f, 0.0f, 0.0f };
+			{ Bounding = 0U, Test = 1U, Diffuse = 2U, Specular = 3U, Emissive = 4U };
 			// Type of material.
 			Material::Types type { 0U };
-			// Emission flag.
-			std::uint32_t emissive { 0U };
+			// Material whiteness.
+			glm::vec4 albedo { 0.0f, 0.0f, 0.0f, 0.0f };
 			// Index of refraction relative to the air (1.0), used upon scattering.
 			float refractive_index { 0.0f };
 			// Ray scatter spread on specular surfaces.

@@ -5,7 +5,7 @@
 // ========================================================================== //
 #version 460
 // Workspace settings.
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 // Structures.
 struct Ray {
 	vec3 origin;
@@ -32,6 +32,12 @@ struct Primitive {
 	float radius;
 	uvec4 vertices;
 };
+struct Material {
+	uint type;
+	vec4 colour;
+	float r_idx;
+	float fuzz;
+};
 // Layout bindings.
 layout(std140, set = 0, binding = 0) uniform Settings {
 	float t_min;
@@ -54,11 +60,11 @@ layout(std140, set = 2, binding = 0) buffer restrict readonly Vertices {
 layout(std140, set = 2, binding = 1) buffer restrict readonly Transforms {
 	Transform[] transforms;
 };
+layout(std140, set = 2, binding = 2) buffer restrict readonly Materials {
+	Material[] materials;
+};
 layout(std140, set = 2, binding = 3) buffer restrict readonly Primitives {
 	Primitive[] primitives;
-};
-layout(std140, set = 2, binding = 4) buffer restrict readonly U_Vertices {
-	vec3[] u_vertices;
 };
 // Primitive types:
 #define EMPTY		0
@@ -201,40 +207,38 @@ bool triangle(
 // hit on the hit structure respective to the ray.
 void main()
 {
-	if(gl_GlobalInvocationID.s > width || gl_GlobalInvocationID.t > height) { return; }
+	if(gl_GlobalInvocationID.s >= width || gl_GlobalInvocationID.t >= height) { return; }
 	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t * width;
 	if(bool(rays[idx].missed)) { return; }
 	
 	for(uint i = 0; i < n_primitives; ++i)
 	{
-		const uint v_offset = i * 3;
-		bool hit = false;
-		Hit h = Hit(vec3(0.0), 0.0, vec3(0.0), 0, 0);
+		bool hit = false; Hit h = Hit(vec3(0.0), 0.0, vec3(0.0), 0, 0);
 		// Cycle through all primitives.
-		switch(primitives[i].type)
+		if(primitives[i].type == SPHERE)
 		{
-		case SPHERE:
 			hit = sphere(
 				rays[idx].origin, rays[idx].direction,
-				u_vertices[v_offset], u_vertices[v_offset + 1].x,
+				vertices[primitives[i].vertices.x],
+				primitives[i].radius,
 				h.time, h.point, h.normal, h.inside, false);
-			break;
-		case CUBOID:
+		}
+		else if (primitives[i].type == CUBOID)
+		{
 			hit = cuboid(
 				rays[idx].origin, rays[idx].direction,
-				u_vertices[v_offset], u_vertices[v_offset + 1],
+				vertices[primitives[i].vertices.x],
+				vertices[primitives[i].vertices.y],
 				h.time, h.point, h.normal, h.inside, false);
-			break;
-		case TRIANGLE:
+		}
+		else if (primitives[i].type == TRIANGLE)
+		{
 			hit = triangle(
 				rays[idx].origin, rays[idx].direction,
-				u_vertices[v_offset], u_vertices[v_offset + 1],
-				u_vertices[v_offset + 2],
+				vertices[primitives[i].vertices.x],
+				vertices[primitives[i].vertices.y],
+				vertices[primitives[i].vertices.z],
 				h.time, h.point, h.normal, h.inside, false);
-			break;
-		default:
-			hit = false;
-			break;
 		}
 		if(hit)
 		{ 
@@ -256,7 +260,7 @@ void main()
 			}
 		}
 	}
-	if(hits[idx].time != 0.0)
+	if(hits[idx].time > 0.0)
 	{
 		hits[idx].normal = normalize(hits[idx].normal);
 	}

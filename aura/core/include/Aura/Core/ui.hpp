@@ -76,6 +76,10 @@ namespace Aura::Core
 		/// Checks if the window should close.
 		/// </summary>
 		bool shouldWindowClose();
+		/// <summary>
+		/// Sets the window close flag.
+		/// </summary>
+		void setWindowCloseFlag(bool const & close);
 		private:
 		/// <summary>
 		/// Creates a window according given settings. Changes settings window

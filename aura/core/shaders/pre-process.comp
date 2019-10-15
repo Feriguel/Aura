@@ -5,7 +5,7 @@
 // ========================================================================== //
 #version 460
 // Workspace settings.
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 // Layout bindings.
 layout(std140, set = 0, binding = 0) uniform Settings {
 	float t_min;
@@ -23,7 +23,7 @@ layout(std140, set = 1, binding = 2) buffer restrict Pixels {
 // on the pixel respective to the ray.
 void main()
 {
-	if(gl_GlobalInvocationID.s > width || gl_GlobalInvocationID.t > height) { return; }
-	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t* width;
+	if(gl_GlobalInvocationID.s >= width || gl_GlobalInvocationID.t >= height) { return; }
+	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t * width;
 	pixels[idx] = vec4(0.0);
 }

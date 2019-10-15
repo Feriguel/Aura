@@ -666,7 +666,7 @@ namespace Aura::Core
 	/// </summary>
 	void RayTracer::setUpSceneInfo()
 	{
-		constexpr std::uint32_t n_buffers { 5U };
+		constexpr std::uint32_t n_buffers { 4U };
 
 		std::array<vk::DescriptorSetLayoutBinding, n_buffers> const binds {
 			// - Binding number, descriptor type and count.
@@ -678,8 +678,6 @@ namespace Aura::Core
 			vk::DescriptorSetLayoutBinding { 2U, vk::DescriptorType::eStorageBuffer, 1U,
 				vk::ShaderStageFlagBits::eCompute, nullptr },
 			vk::DescriptorSetLayoutBinding { 3U, vk::DescriptorType::eStorageBuffer, 1U,
-				vk::ShaderStageFlagBits::eCompute, nullptr },
-			vk::DescriptorSetLayoutBinding { 4U, vk::DescriptorType::eStorageBuffer, 1U,
 				vk::ShaderStageFlagBits::eCompute, nullptr } };
 		createDescriptorSetLayout({}, n_buffers, binds.data(), scene_info.set_layout);
 
@@ -687,8 +685,7 @@ namespace Aura::Core
 			static_cast<vk::DeviceSize>(sizeof(Vertex) * EnvLimits::limit_vertices),
 			static_cast<vk::DeviceSize>(sizeof(Transform) * EnvLimits::limit_entities),
 			static_cast<vk::DeviceSize>(sizeof(Material) * EnvLimits::limit_materials),
-			static_cast<vk::DeviceSize>(sizeof(Primitive) * EnvLimits::limit_primitives),
-			static_cast<vk::DeviceSize>(sizeof(glm::vec4) * EnvLimits::limit_primitives * 3U)
+			static_cast<vk::DeviceSize>(sizeof(Primitive) * EnvLimits::limit_primitives)
 		};
 		scene_info.buffers.resize(n_buffers);
 
@@ -734,16 +731,15 @@ namespace Aura::Core
 	/// </summary>
 	void RayTracer::updateSceneInfo()
 	{
-		constexpr std::uint32_t n_buffers { 5U };
+		constexpr std::uint32_t n_buffers { 4U };
 
 		std::array<vk::DescriptorBufferInfo, n_buffers> buffers {
-			scene_info.buffers[0U], scene_info.buffers[1U], scene_info.buffers[2U],
-			scene_info.buffers[3U], scene_info.buffers[4U], };
+			scene_info.buffers[0U], scene_info.buffers[1U],
+			scene_info.buffers[2U], scene_info.buffers[3U] };
 		buffers[0U].offset = 0U;
 		buffers[1U].offset = 0U;
 		buffers[2U].offset = 0U;
 		buffers[3U].offset = 0U;
-		buffers[4U].offset = 0U;
 		std::array<vk::WriteDescriptorSet, n_buffers> const writes {
 			// - Destination set, binding and array element, count.
 			// - Type and info(Image, Buffer, Texel).
@@ -754,9 +750,7 @@ namespace Aura::Core
 			vk::WriteDescriptorSet{scene_info.set, 2U, 0U, 1U,
 				vk::DescriptorType::eStorageBuffer, nullptr, &buffers[2U], nullptr},
 			vk::WriteDescriptorSet{scene_info.set, 3U, 0U, 1U,
-				vk::DescriptorType::eStorageBuffer, nullptr, &buffers[3U], nullptr},
-			vk::WriteDescriptorSet{scene_info.set, 4U, 0U, 1U,
-				vk::DescriptorType::eStorageBuffer, nullptr, &buffers[4U], nullptr}
+				vk::DescriptorType::eStorageBuffer, nullptr, &buffers[3U], nullptr}
 		};
 		device.updateDescriptorSets(n_buffers, writes.data(), 0U, nullptr, dispatch);
 	}
@@ -765,7 +759,7 @@ namespace Aura::Core
 	/// </summary>
 	void RayTracer::tearDownSceneInfo()
 	{
-		constexpr std::uint32_t n_buffers { 5U };
+		constexpr std::uint32_t n_buffers { 4U };
 
 		for(std::size_t i { 0U }; i < n_buffers; ++i)
 		{

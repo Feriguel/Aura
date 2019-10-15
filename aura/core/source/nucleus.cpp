@@ -101,9 +101,7 @@ namespace Aura::Core
 	{
 		if(ui.shouldWindowClose())
 		{
-			render.waitIdle();
-			tearDown(true, true);
-			setUp(true, true);
+			ui.setWindowCloseFlag(false);
 		}
 		std::future<void> render_task {};
 		frameCounterReset(max_frames);

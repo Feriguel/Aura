@@ -5,19 +5,12 @@
 // ========================================================================== //
 #version 460
 // Workspace settings.
-layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 8, local_size_y = 1, local_size_z = 1) in;
 // Structures.
 struct Transform {
 	mat4 t;
 	mat4 s;
 	mat4 r;
-};
-struct Material { 
-	vec4 albedo;
-	uint type;
-	uint emissive;
-	float r_idx;
-	float fuzz;
 };
 struct Primitive {
 	uint type;
@@ -25,6 +18,12 @@ struct Primitive {
 	uint m_idx;
 	float radius;
 	uvec4 vertices;
+};
+struct Material {
+	uint type;
+	vec4 colour;
+	float r_idx;
+	float fuzz;
 };
 // Layout bindings.
 layout(std140, set = 0, binding = 0) uniform Settings {
@@ -36,7 +35,7 @@ layout(std140, set = 0, binding = 0) uniform Settings {
 	uint width;
 	uint height;
 };
-layout(std140, set = 1, binding = 0) buffer restrict readonly Vertices {
+layout(std140, set = 1, binding = 0) buffer restrict Vertices {
 	vec3[] vertices;
 };
 layout(std140, set = 1, binding = 1) buffer restrict readonly Transforms {
@@ -45,11 +44,8 @@ layout(std140, set = 1, binding = 1) buffer restrict readonly Transforms {
 layout(std140, set = 1, binding = 2) buffer restrict readonly Materials {
 	Material[] materials;
 };
-layout(std140, set = 1, binding = 3) buffer restrict readonly Primitives {
+layout(std140, set = 1, binding = 3) buffer restrict Primitives {
 	Primitive[] primitives;
-};
-layout(std140, set = 1, binding = 4) buffer restrict writeonly U_Vertices {
-	vec3[] u_vertices;
 };
 // Primitive types:
 #define EMPTY		0
@@ -62,34 +58,38 @@ void main()
 {
 	if(gl_GlobalInvocationID.x >= n_primitives) { return; }
 	const uint idx = gl_GlobalInvocationID.x;
+	
 	const restrict Transform transform = transforms[primitives[idx].t_idx];
-	const uint offset = idx * 3;
+	const vec4 v0 = vec4(vertices[primitives[idx].vertices.x], 1.0);
+	const vec4 v1 = vec4(vertices[primitives[idx].vertices.y], 1.0);
+	const vec4 v2 = vec4(vertices[primitives[idx].vertices.z], 1.0);
+	const float r = primitives[idx].radius;
 	switch(primitives[idx].type)
 	{
 		case SPHERE:
 		{
 			const mat4 trf = transform.t * transform.r;
-			u_vertices[offset] = vec3(trf * vec4(vertices[primitives[idx].vertices.x], 1.0));
-			const vec4 r_tmp = transform.s * vec4(primitives[idx].radius, primitives[idx].radius, primitives[idx].radius, 1.0);
-			u_vertices[offset + 1].x = (r_tmp.x + r_tmp.y + r_tmp.z) * 0.3333333;
+			vertices[primitives[idx].vertices.x] = vec3(trf * v0);
+			const vec4 r_tmp = transform.s * vec4(r, r, r, 1.0);
+			primitives[idx].radius = (r_tmp.x + r_tmp.y + r_tmp.z) / 3;
 			return;
 		}
 		case CUBOID:
 		{
-			u_vertices[offset] = vertices[primitives[idx].vertices.x];
-			u_vertices[offset + 1] = vertices[primitives[idx].vertices.y];
+			const mat4 trf = transform.t * transform.s;
+			vertices[primitives[idx].vertices.x] = vec3(trf * v0);
+			vertices[primitives[idx].vertices.y] = vec3(trf * v1);
 			return;
 		}
 		case TRIANGLE:
 		{
 			const mat4 trf = transform.t * transform.r * transform.s;
-			u_vertices[offset] = vec3(trf * vec4(vertices[primitives[idx].vertices.x], 1.0));
-			u_vertices[offset + 1] = vec3(trf * vec4(vertices[primitives[idx].vertices.y], 1.0));
-			u_vertices[offset + 2] = vec3(trf * vec4(vertices[primitives[idx].vertices.z], 1.0));
+			vertices[primitives[idx].vertices.x] = vec3(trf * v0);
+			vertices[primitives[idx].vertices.y] = vec3(trf * v1);
+			vertices[primitives[idx].vertices.z] = vec3(trf * v2);
 			return;
 		}
 		default:
 			return;
 	}
-
 }

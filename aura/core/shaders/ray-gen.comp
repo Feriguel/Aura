@@ -5,7 +5,7 @@
 // ========================================================================== //
 #version 460
 // Workspace settings.
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 // Structures.
 struct Ray {
 	vec3 origin;
@@ -71,13 +71,15 @@ float random( vec2 p )
 // The work space should be the output image dimensions.
 void main()
 {
-	if(gl_GlobalInvocationID.s > width || gl_GlobalInvocationID.t > height) { return; }
+	if(gl_GlobalInvocationID.s >= width || gl_GlobalInvocationID.t >= height) { return; }
 	const uint idx = gl_GlobalInvocationID.s + gl_GlobalInvocationID.t * width;
 	// Calculate target point (pixel coordinates).
 	const float s = float(gl_GlobalInvocationID.s) / width;
 	const float t = float(gl_GlobalInvocationID.t) / height;
 	// Randomize origin within the lens and set albedo.
-	const vec3 o = origin + u * lens_radius * r.s + v * lens_radius * r.t;
+	const vec3 o = origin
+		+ u * lens_radius * random(vec2(s + r.s, t + r.t))
+		+ v * lens_radius * random(vec2(t + r.t, s + r.s));
 	rays[idx].origin = o;
 	rays[idx].albedo = vec3(1.0, 1.0, 1.0);
 	// Calculate direction and length.

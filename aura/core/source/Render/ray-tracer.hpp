@@ -64,12 +64,12 @@ namespace Aura::Core
 	class RayTracer : public VulkanSwapchain
 	{
 		// Work group sizes.
-		static constexpr std::uint32_t pre_gsize[3U] = { 16U, 16U, 1U };
-		static constexpr std::uint32_t vertex_gsize[3U] = { 128U, 1U, 1U };
-		static constexpr std::uint32_t gen_gsize[3U] = { 16U, 16U, 1U };
-		static constexpr std::uint32_t intersect_gsize[3U] = { 16U, 16U, 1U };
-		static constexpr std::uint32_t colour_and_scatter_gsize[3U] = { 16U, 16U, 1U };
-		static constexpr std::uint32_t post_gsize[3U] = { 16U, 16U, 1U };
+		static constexpr std::uint32_t pre_gsize[3U] = { 8U, 8U, 1U };
+		static constexpr std::uint32_t vertex_gsize[3U] = { 8U, 1U, 1U };
+		static constexpr std::uint32_t gen_gsize[3U] = { 8U, 8U, 1U };
+		static constexpr std::uint32_t intersect_gsize[3U] = { 8U, 8U, 1U };
+		static constexpr std::uint32_t colour_and_scatter_gsize[3U] = { 8U, 8U, 1U };
+		static constexpr std::uint32_t post_gsize[3U] = { 8U, 8U, 1U };
 		// Shader folder location
 		static constexpr char const * shader_folder = "../aura/core/shaders/";
 		// Scene access shared guard.

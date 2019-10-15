@@ -100,6 +100,13 @@ namespace Aura::Core
 		return glfwWindowShouldClose(window);
 	}
 	/// <summary>
+	/// Sets the window close flag.
+	/// </summary>
+	void UI::setWindowCloseFlag(bool const & close)
+	{
+		glfwSetWindowShouldClose(window, static_cast<int>(close));
+	}
+	/// <summary>
 	/// Creates a window according given settings. Changes settings window
 	/// dimensions if in full-screen or windowed full-screen.
 	/// Returns window creation success.
