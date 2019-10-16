@@ -59,14 +59,14 @@ namespace Aura
 			/// </summary>
 			enum struct Types : std::uint32_t
 			{ Bounding = 0U, Test = 1U, Diffuse = 2U, Specular = 3U, Emissive = 4U };
-			// Type of material.
-			Material::Types type { 0U };
 			// Material whiteness.
 			glm::vec4 albedo { 0.0f, 0.0f, 0.0f, 0.0f };
+			// Type of material.
+			Material::Types type { 0U };
 			// Index of refraction relative to the air (1.0), used upon scattering.
 			float refractive_index { 0.0f };
 			// Ray scatter spread on specular surfaces.
-			float fuzziness { 0.0f };
+			alignas(sizeof(glm::vec2)) float fuzziness { 0.0f };
 		};
 		/// <summary>
 		/// Definition of a hittable surface within the ray tracer.

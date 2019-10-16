@@ -84,9 +84,9 @@ namespace Aura
 			// Type of created window.
 			WindowModes window_mode { WindowModes::Windowed };
 			// Image width in pixels.
-			std::uint32_t width { 1280U };
+			std::uint32_t width { 500U };
 			// Image height in pixels.
-			std::uint32_t height { 720U };
+			std::uint32_t height { 500U };
 			// Selected device name.
 			std::string device_name {};
 			// Anti-aliasing additional samples, if not 0 randomizes each pixel
@@ -94,11 +94,11 @@ namespace Aura
 			// gen rays direction is fixed.
 			std::uint32_t anti_aliasing { 1U };
 			// Maximum bounces allowed for each ray.
-			std::uint32_t ray_depth { 6U };
+			std::uint32_t ray_depth { 3U };
 			// Minimum ray lifetime.
 			float t_min { 0.0000001f };
-			// Maximum ray lifetime (0.0f is infinite).
-			float t_max { 1000.0f };
+			// Maximum ray lifetime.
+			float t_max { 2500.0f };
 		};
 	}
 }

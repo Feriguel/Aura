@@ -33,8 +33,8 @@ struct Primitive {
 	uvec4 vertices;
 };
 struct Material {
-	uint type;
 	vec4 colour;
+	uint type;
 	float r_idx;
 	float fuzz;
 };
@@ -48,10 +48,10 @@ layout(std140, set = 0, binding = 0) uniform Settings {
 	uint width;
 	uint height;
 };
-layout(std140, set = 1, binding = 0) buffer restrict Rays {
+layout(std140, set = 1, binding = 0) buffer coherent Rays {
 	Ray[] rays;
 };
-layout(std140, set = 1, binding = 1) buffer restrict Hits {
+layout(std140, set = 1, binding = 1) buffer coherent Hits {
 	Hit[] hits;
 };
 layout(std140, set = 1, binding = 2) buffer restrict writeonly Pixels {
@@ -81,19 +81,34 @@ layout(push_constant) uniform Random {
 #define SPECULAR   3
 #define EMISSIVE   4
 // Minimum distance from origin:	0.123456789012345
-#define MIN_DIST					0.0000005
+#define MIN_DIST					0.0000001
+// Input: It uses texture coords as the random number seed.
+// Output: Random number: [0,1), that is between 0.0 and 0.999999... inclusive.
+// Author: Michael Pohoreski
+// Copyright: Copyleft 2012 :-)
+// NOTE: This has been upgraded to version 3 !!
+float random( vec2 p )
+{
+	// We need irrationals for pseudo randomness.
+	// Most (all?) known transcendental numbers will (generally) work.
+	const vec2 r = vec2(
+		23.1406926327792690,	// e^pi (Gelfond's constant)
+		2.6651441426902251		// 2^sqrt(2) (Gelfond–Schneider constant)
+	);
+	return fract( cos( mod( 123456789., 1e-7 + 256. * dot(p,r) ) ) );  
+}
 // Test albedo.
-vec3 test_albedo(in restrict const vec3 n)
+vec3 test_albedo(in const vec3 n)
 {
 	return (n + 1.0) * 0.5;
 }
 // Alpha albedo.
-vec3 alpha_albedo(in restrict const vec3 albedo, in restrict const float alpha)
+vec3 alpha_albedo(in const vec3 albedo, in const float alpha)
 {
 	return alpha * albedo + 1.0 - alpha;
 }
 // Background albedo.
-vec3 background_albedo(in restrict const vec3 d)
+vec3 background_albedo(in const vec3 d)
 {
 	const float vr = (d.y + 1.0) * 0.5;
 	const vec3 bottom = vec3(0.5, 0.5, 0.5) * (1.0 - vr);
@@ -162,7 +177,7 @@ void diffuse(in const uint idx, in const vec3 albedo)
 	const vec3 n = hits[idx].normal;
 
 	rays[idx].albedo *= albedo;
-	rays[idx].direction = normalize(diffuse_reflection(n));
+	rays[idx].direction = diffuse_reflection(n);
 }
 // Specular. Updates with the material albedo based on the intensity level
 // and either reflect or refract the ray.
@@ -190,7 +205,6 @@ void specular(in const uint idx, in const vec3 albedo)
 		rays[idx].direction = specular_reflection(n, d, fuzz);
 		rays[idx].albedo *= albedo;
 	}
-	rays[idx].direction = normalize(rays[idx].direction);
 }
 // Emissive. Updates with the material albedo based on the intensity level
 // and either refract or stop the ray. Returns the new pixel sample.
@@ -208,13 +222,9 @@ vec4 emissive(in const uint idx, in const vec3 albedo)
 	{
 		vec3 nd;
 		if(refraction(n, d, r_idx, inside, nd))
-		{
-			rays[idx].direction = normalize(nd);
-		}
+		{ rays[idx].direction = nd; }
 		else
-		{
-			rays[idx].missed = 1;
-		}
+		{ rays[idx].missed = 1; }
 		rays[idx].albedo *= alpha_albedo(albedo, alpha);
 	}
 	else
@@ -239,7 +249,7 @@ void main()
 	{ 
 		pixels[idx] += emissive(idx, test_albedo(hits[idx].normal));
 	}
-	else if(materials[hits[idx].m_idx].type == uint(DIFFUSE))
+	else if(materials[hits[idx].m_idx].type == DIFFUSE)
 	{ 
 		diffuse(idx, materials[hits[idx].m_idx].colour.rgb);
 	}
@@ -255,6 +265,7 @@ void main()
 	{
 		pixels[idx] += vec4(1.0, 0.0, 1.0, 1.0);
 	}
+	rays[idx].direction = normalize(rays[idx].direction);
 	rays[idx].origin = hits[idx].point + MIN_DIST * rays[idx].direction;
 	hits[idx].time = 0.0;
 }

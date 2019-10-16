@@ -33,8 +33,8 @@ struct Primitive {
 	uvec4 vertices;
 };
 struct Material {
-	uint type;
 	vec4 colour;
+	uint type;
 	float r_idx;
 	float fuzz;
 };

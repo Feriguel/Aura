@@ -74,13 +74,6 @@ namespace Aura::Core
 			{
 				return nullptr;
 			}
-			/*
-			for(std::size_t i { 0U }; i < n_vertices; ++i)
-			{
-				if(scene->vertices.data[i].position != vertex.position) { continue; }
-				return &scene->vertices.data[i];
-			}
-			*/
 			idx = static_cast<std::uint32_t>(n_vertices);
 			Vertex & new_vertex = scene->vertices.data.emplace_back(std::move(vertex));
 			scene->vertices.updated = true;
@@ -141,17 +134,6 @@ namespace Aura::Core
 			{
 				return nullptr;
 			}
-			/*
-			for(std::size_t i { 0U }; i < n_materials; ++i)
-			{
-				if(scene->materials.data[i].type != material.type) { continue; }
-				if(scene->materials.data[i].emissive != material.emissive) { continue; }
-				if(scene->materials.data[i].refractive_index != material.refractive_index) { continue; }
-				if(scene->materials.data[i].fuzziness != material.fuzziness) { continue; }
-				if(scene->materials.data[i].albedo != material.albedo) { continue; }
-				return &scene->materials.data[i];
-			}
-			*/
 			idx = static_cast<std::uint32_t>(n_materials);
 			Material & new_material = scene->materials.data.emplace_back(std::move(material));
 			scene->materials.updated = true;

@@ -116,7 +116,7 @@ namespace Aura
 			// Hit material index.
 			std::uint32_t m_idx { 0U };
 			// Inner hit flag.
-			std::uint32_t inside { 0U };
+			alignas(sizeof(glm::vec4)) std::uint32_t inside { 0U };
 		};
 		/// <summary>
 		/// Pixel state.
