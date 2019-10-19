@@ -174,6 +174,11 @@ namespace Aura::Core
 		/// Updates scene vertices.
 		/// </summary>
 		bool updateScene();
+		/// <summary>
+		/// Updates the device memory
+		/// </summary>
+		void updateMem(vk::DescriptorBufferInfo & buffer, vk::DeviceMemory & memory,
+			vk::DeviceSize size, void * data);
 
 		// ------------------------------------------------------------------ //
 		// Resources.

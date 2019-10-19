@@ -36,7 +36,8 @@ namespace Aura::Core
 		std::string const & app_name, std::uint16_t const & app_major,
 		std::uint16_t const & app_minor, std::uint16_t const & app_patch
 	) :
-		ThreadPool(std::thread::hardware_concurrency()),
+		ThreadPool(1U),
+		//ThreadPool(std::thread::hardware_concurrency()),
 		app_info({ app_name, app_major, app_minor, app_patch }),
 		ui(*this), environment(*this), render(*this),
 		frame_counter(0U), frame_limit(0U), rendering(false)
@@ -114,10 +115,20 @@ namespace Aura::Core
 					std::unique_lock<std::mutex> lock { rendering_guard };
 					rendering = true;
 				}
-				if constexpr(debug_settings.frame_time)
-				{ render_task = enqueue([&] { renderWithTime(); }); }
+				if (n_threads == 1)
+				{
+					if constexpr(debug_settings.frame_time)
+					{ renderWithTime(); }
+					else
+					{ renderFrame(); }
+				}
 				else
-				{ render_task = enqueue([&] { renderFrame(); }); }
+				{
+					if constexpr(debug_settings.frame_time)
+					{ render_task = enqueue([&] { renderWithTime(); }); }
+					else
+					{ render_task = enqueue([&] { renderFrame(); }); }
+				}
 			}
 			if(frameCounterCheck()) { break; }
 		}

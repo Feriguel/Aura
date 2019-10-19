@@ -48,10 +48,10 @@ layout(std140, set = 0, binding = 0) uniform Settings {
 	uint width;
 	uint height;
 };
-layout(std140, set = 1, binding = 0) buffer coherent Rays {
+layout(std140, set = 1, binding = 0) buffer restrict Rays {
 	Ray[] rays;
 };
-layout(std140, set = 1, binding = 1) buffer coherent Hits {
+layout(std140, set = 1, binding = 1) buffer restrict Hits {
 	Hit[] hits;
 };
 layout(std140, set = 1, binding = 2) buffer restrict writeonly Pixels {

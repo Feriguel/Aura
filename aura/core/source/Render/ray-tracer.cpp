@@ -208,16 +208,8 @@ namespace Aura::Core
 		settings.n_bounces = n_bounces;
 		settings.n_primitives = n_primitives;
 
-		void * mem { nullptr };
-		vk::Result result { device.mapMemory(render_settings.memories[0U],
-			render_settings.buffers[0U].offset, render_settings.buffers[0U].range, {}, &mem, dispatch) };
-		if(result != vk::Result::eSuccess)
-		{ vk::throwResultException(result, "RenderSettings memory map"); }
-		if(mem)
-		{
-			std::memcpy(mem, &settings, render_settings.buffers[0U].range);
-			device.unmapMemory(render_settings.memories[0U], dispatch);
-		}
+		updateMem(render_settings.buffers[0U], render_settings.memories[0U],
+			render_settings.buffers[0U].range, &settings);
 	}
 	/// <summary>
 	/// Updates the ray launcher using the camera in the scene.
@@ -263,16 +255,8 @@ namespace Aura::Core
 			launcher.vertical *= 2.0f;
 			launcher.horizontal *= 2.0f;
 		}
-		void * mem { nullptr };
-		vk::Result result { device.mapMemory(ray_launcher.memories[0U],
-			ray_launcher.buffers[0U].offset,ray_launcher.buffers[0U].range, {}, &mem, dispatch) };
-		if(result != vk::Result::eSuccess)
-		{ vk::throwResultException(result, "RayLauncher memory map"); }
-		if(mem)
-		{
-			std::memcpy(mem, &launcher, ray_launcher.buffers[0U].range);
-			device.unmapMemory(ray_launcher.memories[0U], dispatch);
-		}
+		updateMem(ray_launcher.buffers[0U], ray_launcher.memories[0U],
+			ray_launcher.buffers[0U].range, &launcher);
 		return true;
 	}
 	/// <summary>
@@ -286,15 +270,15 @@ namespace Aura::Core
 			std::unique_lock<std::mutex> vertices_lock(scene->vertices.guard);
 			if(scene->vertices.updated)
 			{
-				void * mem { nullptr };
-				vk::Result result { device.mapMemory(scene_info.memories[0U],
-					scene_info.buffers[0U].offset, scene_info.buffers[0U].range, {}, &mem, dispatch) };
-				if(result != vk::Result::eSuccess)
-				{ vk::throwResultException(result, "Vertices memory map"); }
-				if(mem)
+				if constexpr(DebugSettings::split_memory)
 				{
-					std::memcpy(mem, scene->vertices.data.data(), scene->vertices.data.size() * sizeof(Vertex));
-					device.unmapMemory(scene_info.memories[0U], dispatch);
+					updateMem(scene_info.buffers[0U], scene_info.memories[0U],
+						scene->vertices.data.size() * sizeof(Vertex), scene->vertices.data.data());
+				}
+				else
+				{
+					updateMem(scene_info.buffers[0U], scene_info.memories[0U],
+						scene->vertices.data.size() * sizeof(Vertex), scene->vertices.data.data());
 				}
 				scene->vertices.updated = false;
 				update = true;
@@ -304,15 +288,15 @@ namespace Aura::Core
 			std::unique_lock<std::mutex> transforms_lock(scene->transforms.guard);
 			if(scene->transforms.updated)
 			{
-				void * mem { nullptr };
-				vk::Result result { device.mapMemory(scene_info.memories[0U],
-					scene_info.buffers[1U].offset, scene_info.buffers[1U].range, {}, &mem, dispatch) };
-				if(result != vk::Result::eSuccess)
-				{ vk::throwResultException(result, "Transforms memory map"); }
-				if(mem)
+				if constexpr(DebugSettings::split_memory)
 				{
-					std::memcpy(mem, scene->transforms.data.data(), scene->transforms.data.size() * sizeof(Transform));
-					device.unmapMemory(scene_info.memories[0U], dispatch);
+					updateMem(scene_info.buffers[1U], scene_info.memories[1U],
+						scene->transforms.data.size() * sizeof(Transform), scene->transforms.data.data());
+				}
+				else
+				{
+					updateMem(scene_info.buffers[1U], scene_info.memories[0U],
+						scene->transforms.data.size() * sizeof(Transform), scene->transforms.data.data());
 				}
 				scene->transforms.updated = false;
 				update = true;
@@ -322,15 +306,15 @@ namespace Aura::Core
 			std::unique_lock<std::mutex> materials_lock(scene->materials.guard);
 			if(scene->materials.updated)
 			{
-				void * mem { nullptr };
-				vk::Result result { device.mapMemory(scene_info.memories[0U],
-					scene_info.buffers[2U].offset,scene_info.buffers[2U].range, {}, &mem, dispatch) };
-				if(result != vk::Result::eSuccess)
-				{ vk::throwResultException(result, "Materials memory map"); }
-				if(mem)
+				if constexpr(DebugSettings::split_memory)
 				{
-					std::memcpy(mem, scene->materials.data.data(), scene->materials.data.size() * sizeof(Material));
-					device.unmapMemory(scene_info.memories[0U], dispatch);
+					updateMem(scene_info.buffers[2U], scene_info.memories[2U],
+						scene->materials.data.size() * sizeof(Material), scene->materials.data.data());
+				}
+				else
+				{
+					updateMem(scene_info.buffers[2U], scene_info.memories[0U],
+						scene->materials.data.size() * sizeof(Material), scene->materials.data.data());
 				}
 				scene->materials.updated = false;
 				update = true;
@@ -340,21 +324,37 @@ namespace Aura::Core
 			std::unique_lock<std::mutex> primitives_lock(scene->primitives.guard);
 			if(scene->primitives.updated)
 			{
-				void * mem { nullptr };
-				vk::Result result { device.mapMemory(scene_info.memories[0U],
-					scene_info.buffers[3U].offset,scene_info.buffers[3U].range, {}, &mem, dispatch) };
-				if(result != vk::Result::eSuccess)
-				{ vk::throwResultException(result, "Primitives memory map"); }
-				if(mem)
+				if constexpr(DebugSettings::split_memory)
 				{
-					std::memcpy(mem, scene->primitives.data.data(), n_primitives * sizeof(Primitive));
-					device.unmapMemory(scene_info.memories[0U], dispatch);
+					updateMem(scene_info.buffers[3U], scene_info.memories[3U],
+						n_primitives * sizeof(Primitive), scene->primitives.data.data());
+				}
+				else
+				{
+					updateMem(scene_info.buffers[3U], scene_info.memories[0U],
+						n_primitives * sizeof(Primitive), scene->primitives.data.data());
 				}
 				scene->primitives.updated = false;
 				update = true;
 			}
 		}
 		return update;
+	}
+	/// <summary>
+	/// Updates the device memory
+	/// </summary>
+	void RayTracer::updateMem(vk::DescriptorBufferInfo & buffer, vk::DeviceMemory & memory,
+		vk::DeviceSize size, void * data)
+	{
+		void * mem { nullptr };
+		vk::Result result { device.mapMemory(memory, buffer.offset, buffer.range, {}, &mem, dispatch) };
+		if(result != vk::Result::eSuccess)
+		{ vk::throwResultException(result, "Memory map"); }
+		if(mem)
+		{
+			std::memcpy(mem, data, size);
+			device.unmapMemory(memory, dispatch);
+		}
 	}
 
 	// ------------------------------------------------------------------ //
@@ -457,7 +457,7 @@ namespace Aura::Core
 
 		vk::DeviceSize const settings_size { static_cast<vk::DeviceSize>(sizeof(RenderSettings)) };
 		vk::Buffer buffer {};
-		createBuffer({}, settings_size, vk::BufferUsageFlagBits::eUniformBuffer, 1U, &compute_family, buffer);
+		createBuffer({}, settings_size, vk::BufferUsageFlagBits::eUniformBuffer, 1U, & compute_family, buffer);
 		vk::MemoryRequirements mem {};
 		device.getBufferMemoryRequirements(buffer, &mem, dispatch);
 
@@ -518,7 +518,7 @@ namespace Aura::Core
 
 		vk::DeviceSize const launcher_size { static_cast<vk::DeviceSize>(sizeof(RayLauncher)) };
 		vk::Buffer buffer {};
-		createBuffer({}, launcher_size, vk::BufferUsageFlagBits::eUniformBuffer, 1U, &compute_family, buffer);
+		createBuffer({}, launcher_size, vk::BufferUsageFlagBits::eUniformBuffer, 1U, & compute_family, buffer);
 		vk::MemoryRequirements mem {};
 		device.getBufferMemoryRequirements(buffer, &mem, dispatch);
 
@@ -590,36 +590,61 @@ namespace Aura::Core
 		vk::MemoryPropertyFlags const required { vk::MemoryPropertyFlagBits::eDeviceLocal };
 		vk::DeviceSize total_size { 0U };
 		std::uint32_t type_bits { 0U };
-		for(std::size_t i { 0U }; i < n_buffers; ++i)
-		{
-			vk::MemoryRequirements mem {};
-			std::uint32_t mem_type { 0U };
 
-			createBuffer({}, sizes[i], vk::BufferUsageFlagBits::eStorageBuffer, 1U, &compute_family, rays_state.buffers[i].buffer);
-			device.getBufferMemoryRequirements(rays_state.buffers[i].buffer, &mem, dispatch);
-			if(!findMemoryType(mem.memoryTypeBits, required, mem_type))
+		if constexpr(DebugSettings::split_memory)
+		{
+			rays_state.memories.resize(n_buffers);
+			for(std::size_t i { 0U }; i < n_buffers; ++i)
 			{
-				throw std::exception("No memory with required properties. [Rays state]");
+				vk::MemoryRequirements mem {};
+				std::uint32_t mem_type { 0U };
+
+				createBuffer({}, sizes[i], vk::BufferUsageFlagBits::eStorageBuffer, 1U, &compute_family, rays_state.buffers[i].buffer);
+				device.getBufferMemoryRequirements(rays_state.buffers[i].buffer, &mem, dispatch);
+				if(!findMemoryType(mem.memoryTypeBits, required, mem_type))
+				{
+					throw std::exception("No memory with required properties. [Rays state]");
+				}
+				rays_state.buffers[i].offset = 0;
+				rays_state.buffers[i].range = sizes[i];
+				allocateMemory(mem.size, type_bits, rays_state.memories[i]);
+				device.bindBufferMemory(rays_state.buffers[i].buffer, rays_state.memories[i],
+					rays_state.buffers[i].offset, dispatch);
 			}
-			if(i == 0)
-			{
-				type_bits = mem_type;
-			}
-			else if(mem_type != type_bits)
-			{
-				throw std::exception("Memory type bits are different, case not implemented. [Rays state]");
-			}
-			rays_state.buffers[i].offset = total_size;
-			rays_state.buffers[i].range = sizes[i];
-			total_size += mem.size;
 		}
-
-		rays_state.memories.resize(1U);
-		allocateMemory(total_size, type_bits, rays_state.memories[0U]);
-		for(std::size_t i { 0U }; i < n_buffers; ++i)
+		else
 		{
-			device.bindBufferMemory(rays_state.buffers[i].buffer, rays_state.memories[0U],
-				rays_state.buffers[i].offset, dispatch);
+			rays_state.memories.resize(1U);
+			for(std::size_t i { 0U }; i < n_buffers; ++i)
+			{
+				vk::MemoryRequirements mem {};
+				std::uint32_t mem_type { 0U };
+
+				createBuffer({}, sizes[i], vk::BufferUsageFlagBits::eStorageBuffer, 1U, &compute_family, rays_state.buffers[i].buffer);
+				device.getBufferMemoryRequirements(rays_state.buffers[i].buffer, &mem, dispatch);
+				if(!findMemoryType(mem.memoryTypeBits, required, mem_type))
+				{
+					throw std::exception("No memory with required properties. [Rays state]");
+				}
+				if(i == 0)
+				{
+					type_bits = mem_type;
+				}
+				else if(mem_type != type_bits)
+				{
+					throw std::exception("Memory type bits are different, case not implemented. [Rays state]");
+				}
+				rays_state.buffers[i].offset = total_size;
+				rays_state.buffers[i].range = sizes[i];
+				total_size += mem.size;
+			}
+
+			allocateMemory(total_size, type_bits, rays_state.memories[0U]);
+			for(std::size_t i { 0U }; i < n_buffers; ++i)
+			{
+				device.bindBufferMemory(rays_state.buffers[i].buffer, rays_state.memories[0U],
+					rays_state.buffers[i].offset, dispatch);
+			}
 		}
 	}
 	/// <summary>
@@ -657,8 +682,15 @@ namespace Aura::Core
 		for(std::size_t i { 0U }; i < n_buffers; ++i)
 		{
 			destroyBuffer(rays_state.buffers[i].buffer);
+			if constexpr(DebugSettings::split_memory)
+			{
+				freeMemory(rays_state.memories[i]);
+			}
 		}
-		freeMemory(rays_state.memories[0U]);
+		if constexpr(!DebugSettings::split_memory)
+		{
+			freeMemory(rays_state.memories[0U]);
+		}
 		destroyDescriptorSetLayout(rays_state.set_layout);
 	}
 	/// <summary>
@@ -693,36 +725,62 @@ namespace Aura::Core
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent };
 		vk::DeviceSize total_size { 0U };
 		std::uint32_t type_bits { 0U };
-		for(std::size_t i { 0U }; i < n_buffers; ++i)
-		{
-			vk::MemoryRequirements mem {};
-			std::uint32_t mem_type { 0U };
 
-			createBuffer({}, sizes[i], vk::BufferUsageFlagBits::eStorageBuffer, 1U, &compute_family, scene_info.buffers[i].buffer);
-			device.getBufferMemoryRequirements(scene_info.buffers[i].buffer, &mem, dispatch);
-			if(!findMemoryType(mem.memoryTypeBits, required, mem_type))
+
+		if constexpr(DebugSettings::split_memory)
+		{
+			scene_info.memories.resize(n_buffers);
+			for(std::size_t i { 0U }; i < n_buffers; ++i)
 			{
-				throw std::exception("No memory with required properties. [Rays state]");
+				vk::MemoryRequirements mem {};
+				std::uint32_t mem_type { 0U };
+
+				createBuffer({}, sizes[i], vk::BufferUsageFlagBits::eStorageBuffer, 1U, &compute_family, scene_info.buffers[i].buffer);
+				device.getBufferMemoryRequirements(scene_info.buffers[i].buffer, &mem, dispatch);
+				if(!findMemoryType(mem.memoryTypeBits, required, mem_type))
+				{
+					throw std::exception("No memory with required properties. [Rays state]");
+				}
+				scene_info.buffers[i].offset = 0;
+				scene_info.buffers[i].range = sizes[i];
+				allocateMemory(mem.size, mem_type, scene_info.memories[i]);
+				device.bindBufferMemory(scene_info.buffers[i].buffer, scene_info.memories[i],
+					scene_info.buffers[i].offset, dispatch);
 			}
-			if(i == 0)
-			{
-				type_bits = mem_type;
-			}
-			else if(mem_type != type_bits)
-			{
-				throw std::exception("Memory type bits are different, case not implemented. [Rays state]");
-			}
-			scene_info.buffers[i].offset = total_size;
-			scene_info.buffers[i].range = sizes[i];
-			total_size += mem.size;
 		}
-
-		scene_info.memories.resize(1U);
-		allocateMemory(total_size, type_bits, scene_info.memories[0U]);
-		for(std::size_t i { 0U }; i < n_buffers; ++i)
+		else
 		{
-			device.bindBufferMemory(scene_info.buffers[i].buffer, scene_info.memories[0U],
-				scene_info.buffers[i].offset, dispatch);
+			scene_info.memories.resize(1U);
+			for(std::size_t i { 0U }; i < n_buffers; ++i)
+			{
+				vk::MemoryRequirements mem {};
+				std::uint32_t mem_type { 0U };
+
+				createBuffer({}, sizes[i], vk::BufferUsageFlagBits::eStorageBuffer, 1U, &compute_family, scene_info.buffers[i].buffer);
+				device.getBufferMemoryRequirements(scene_info.buffers[i].buffer, &mem, dispatch);
+				if(!findMemoryType(mem.memoryTypeBits, required, mem_type))
+				{
+					throw std::exception("No memory with required properties. [Rays state]");
+				}
+				if(i == 0)
+				{
+					type_bits = mem_type;
+				}
+				else if(mem_type != type_bits)
+				{
+					throw std::exception("Memory type bits are different, case not implemented. [Rays state]");
+				}
+				scene_info.buffers[i].offset = total_size;
+				scene_info.buffers[i].range = sizes[i];
+				total_size += mem.size;
+			}
+
+			allocateMemory(total_size, type_bits, scene_info.memories[0U]);
+			for(std::size_t i { 0U }; i < n_buffers; ++i)
+			{
+				device.bindBufferMemory(scene_info.buffers[i].buffer, scene_info.memories[0U],
+					scene_info.buffers[i].offset, dispatch);
+			}
 		}
 	}
 	/// <summary>
@@ -764,8 +822,15 @@ namespace Aura::Core
 		for(std::size_t i { 0U }; i < n_buffers; ++i)
 		{
 			destroyBuffer(scene_info.buffers[i].buffer);
+			if constexpr(DebugSettings::split_memory)
+			{
+				freeMemory(scene_info.memories[i]);
+			}
 		}
-		freeMemory(scene_info.memories[0U]);
+		if constexpr(!DebugSettings::split_memory)
+		{
+			freeMemory(scene_info.memories[0U]);
+		}
 		destroyDescriptorSetLayout(scene_info.set_layout);
 	}
 
@@ -815,7 +880,7 @@ namespace Aura::Core
 		vk::PipelineCache cache {};
 		vk::ShaderModule shader {};
 
-		std::array<vk::DescriptorSetLayout, n_sets> const set_layouts { 
+		std::array<vk::DescriptorSetLayout, n_sets> const set_layouts {
 			render_settings.set_layout, rays_state.set_layout };
 		createPipelineLayout({}, n_sets, set_layouts.data(), 0U, nullptr, pre_process.layout);
 
@@ -826,7 +891,7 @@ namespace Aura::Core
 		vk::PipelineShaderStageCreateInfo const stage { {},
 			vk::ShaderStageFlagBits::eCompute, shader, "main", nullptr };
 		vk::ComputePipelineCreateInfo const create_info { {}, stage,
-			post_process.layout, vk::Pipeline(), 0U };
+			pre_process.layout, vk::Pipeline(), 0U };
 		createComputePipelines(cache, 1U, &create_info, &pre_process.pipeline);
 		destroyShaderModule(shader);
 	}

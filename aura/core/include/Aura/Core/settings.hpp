@@ -72,7 +72,9 @@ namespace Aura
 			// This is extremely slow.
 			static constexpr bool api_dump { false };
 			// Outputs the time taken to present each frame, in milliseconds.
-			static constexpr bool frame_time { true };
+			static constexpr bool frame_time { false };
+			// When on it splits all buffers memories to separate structures.
+			static constexpr bool split_memory { false };
 		};
 
 		/// <summary>
@@ -84,9 +86,9 @@ namespace Aura
 			// Type of created window.
 			WindowModes window_mode { WindowModes::Windowed };
 			// Image width in pixels.
-			std::uint32_t width { 500U };
+			std::uint32_t width { 1280U };
 			// Image height in pixels.
-			std::uint32_t height { 500U };
+			std::uint32_t height { 720U };
 			// Selected device name.
 			std::string device_name {};
 			// Anti-aliasing additional samples, if not 0 randomizes each pixel
@@ -94,7 +96,7 @@ namespace Aura
 			// gen rays direction is fixed.
 			std::uint32_t anti_aliasing { 1U };
 			// Maximum bounces allowed for each ray.
-			std::uint32_t ray_depth { 3U };
+			std::uint32_t ray_depth { 4U };
 			// Minimum ray lifetime.
 			float t_min { 0.0000001f };
 			// Maximum ray lifetime.

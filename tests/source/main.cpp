@@ -89,7 +89,7 @@ namespace Aura::Test
 			Core::Material material
 			{
 				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
-				Core::Material::Types::Diffuse,
+				Core::Material::Types::Specular,
 				0.0f, 0.0f
 			};
 			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
@@ -99,6 +99,7 @@ namespace Aura::Test
 			ASSERT_TRUE(core->environment.newVertex(v1, v_idx));
 			primitive.vertices.y = v_idx;
 			ASSERT_TRUE(core->environment.entityAddPrimitive(e_idx, primitive));
+			core->environment.entityScale(e_idx, glm::vec3(10.0f, 10.0f, 10.0f));
 		}
 		// Roof
 		{
@@ -127,7 +128,7 @@ namespace Aura::Test
 		{
 			Core::Material material
 			{
-				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
+				glm::vec4(0.75f, 0.75f, 0.3f, 1.0f),
 				Core::Material::Types::Diffuse,
 				0.0f, 0.0f
 			};

@@ -45,6 +45,8 @@ namespace Aura
 			bool stopping;
 			// Task queue.
 			std::queue<Task> tasks;
+			protected:
+			std::size_t const n_threads;
 
 			// ------------------------------------------------------------------ //
 			// Set-up, tear-down pool.
@@ -53,8 +55,8 @@ namespace Aura
 			/// <summary>
 			/// Sets-up the thread pool and starts thread's cycle.
 			/// </summary>
-			explicit ThreadPool(std::size_t n_threads) :
-				stopping(false)
+			explicit ThreadPool(std::size_t const n_threads) :
+				stopping(false), n_threads(n_threads)
 			{
 				for(std::size_t i { 0U }; i < n_threads; ++i)
 				{ pool.emplace_back([&] { cycle(); }); }
@@ -96,8 +98,8 @@ namespace Aura
 			/// </summary>
 			void threadIndices(std::vector<std::thread::id> & indices)
 			{
-				indices.resize(pool.size());
-				for(std::size_t i { 0U }; i < pool.size(); ++i)
+				indices.resize(n_threads);
+				for(std::size_t i { 0U }; i < n_threads; ++i)
 				{
 					indices[i] = pool[i].get_id();
 				}
