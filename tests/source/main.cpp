@@ -66,6 +66,56 @@ namespace Aura::Test
 		// Per-test tear-down logic.
 		void TearDown() override
 		{}
+
+		/// <summary>
+		/// Auxiliary cuboid insert.
+		/// </summary>
+		bool addCuboid(Core::Vertex v0, Core::Vertex v1, Core::Material material, std::uint32_t & e_idx)
+		{
+			std::uint32_t tmp_idx { 0U };
+			Core::Primitive primitive
+			{
+				Core::Primitive::Types::Cuboid, 0U, 0U, 0.0f,
+				glm::uvec4(0U, 0U, 0U, 0U)
+			};
+			if(!core->environment.newMaterial(material, tmp_idx)) { return false; }
+			if(!core->environment.newEntity(tmp_idx, e_idx)) { return false; }
+			if(!core->environment.newVertex(v0, tmp_idx)) { return false; }
+			primitive.vertices.x = tmp_idx;
+			if(!core->environment.newVertex(v1, tmp_idx)) { return false; }
+			primitive.vertices.y = tmp_idx;
+			if(!core->environment.entityAddPrimitive(e_idx, primitive)) { return false; }
+			return true;
+		}
+		/// <summary>
+		/// Auxiliary cuboid insert.
+		/// </summary>
+		bool addSphere(Core::Vertex v0, float radius, Core::Material material, std::uint32_t & e_idx)
+		{
+			std::uint32_t tmp_idx { 0U };
+			Core::Primitive primitive
+			{
+				Core::Primitive::Types::Sphere, 0U, 0U, radius,
+				glm::uvec4(0U, 0U, 0U, 0U)
+			};
+			if(!core->environment.newMaterial(material, tmp_idx)) { return false; }
+			if(!core->environment.newEntity(tmp_idx, e_idx)) { return false; }
+			if(!core->environment.newVertex(v0, tmp_idx)) { return false; }
+			primitive.vertices.x = tmp_idx;
+			if(!core->environment.entityAddPrimitive(e_idx, primitive)) { return false; }
+			return true;
+		}
+		/// <summary>
+		/// Auxiliary cuboid insert.
+		/// </summary>
+		bool addModel(std::string path, Core::Material material, std::uint32_t & e_idx)
+		{
+			std::uint32_t tmp_idx { 0U };
+			if(!core->environment.newMaterial(material, tmp_idx)) { return false; }
+			if(!core->environment.newEntity(tmp_idx, e_idx)) { return false; }
+			if(!core->environment.entityLoadModel(e_idx, path)) { return false; }
+			return true;
+		}
 	};
 
 	// ------------------------------------------------------------------ //
@@ -73,68 +123,30 @@ namespace Aura::Test
 	// ------------------------------------------------------------------ //
 	TEST_F(CoreEnv, BuildSixtyFrameCornellBox)
 	{
-		std::uint32_t m_idx { 0U };
-		std::uint32_t v_idx { 0U };
 		std::uint32_t e_idx { 0U };
+		Core::Vertex cuboid_v0 { glm::vec3(-0.5f, -0.5f, -0.5f) };
+		Core::Vertex cuboid_v1 { glm::vec3(0.5f, 0.5f, 0.5f) };
 
 		// Floor
 		{
-			Core::Primitive primitive
-			{
-				Core::Primitive::Types::Cuboid, 0U, 0U, 0.0f,
-				glm::uvec4(0U, 0U, 0U, 0U)
-			};
-			Core::Vertex v0 { glm::vec3(-2.5f, -2.5f, -2.5f) };
-			Core::Vertex v1 { glm::vec3(2.5f, -2.0f, 2.5f) };
 			Core::Material material
 			{
 				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
-				Core::Material::Types::Specular,
-				0.0f, 0.0f
+				Core::Material::Types::Specular, 0.0f, 0.0f
 			};
-			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
-			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
-			ASSERT_TRUE(core->environment.newVertex(v0, v_idx));
-			primitive.vertices.x = v_idx;
-			ASSERT_TRUE(core->environment.newVertex(v1, v_idx));
-			primitive.vertices.y = v_idx;
-			ASSERT_TRUE(core->environment.entityAddPrimitive(e_idx, primitive));
-			core->environment.entityScale(e_idx, glm::vec3(10.0f, 10.0f, 10.0f));
-		}
-		// Roof
-		{
-			Core::Primitive primitive
-			{
-				Core::Primitive::Types::Cuboid, 0U, 0U, 0.0f,
-				glm::uvec4(0U, 0U, 0U, 0U)
-			};
-			Core::Vertex v0 { glm::vec3(-2.5f, 2.0f, -2.5f) };
-			Core::Vertex v1 { glm::vec3(2.5f, 2.5f, 2.5f) };
-			Core::Material material
-			{
-				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
-				Core::Material::Types::Diffuse,
-				0.0f, 0.0f
-			};
-			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
-			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
-			ASSERT_TRUE(core->environment.newVertex(v0, v_idx));
-			primitive.vertices.x = v_idx;
-			ASSERT_TRUE(core->environment.newVertex(v1, v_idx));
-			primitive.vertices.y = v_idx;
-			ASSERT_TRUE(core->environment.entityAddPrimitive(e_idx, primitive));
+			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(4.0f, 0.2f, 4.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, -2.1f, 0.0f));
 		}
 		// Cube
 		{
 			Core::Material material
 			{
-				glm::vec4(0.75f, 0.75f, 0.3f, 1.0f),
+				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
 				Core::Material::Types::Diffuse,
 				0.0f, 0.0f
 			};
-			ASSERT_TRUE(core->environment.newMaterial(material, m_idx));
-			ASSERT_TRUE(core->environment.newEntity(m_idx, e_idx));
-			ASSERT_TRUE(core->environment.entityLoadModel(e_idx, "models/cube.obj"));
+			ASSERT_TRUE(addModel("models/cube.obj", material, e_idx));
 			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
 			core->environment.entityTranslate(e_idx, glm::vec3(0.5f, -1.0f, 0.5f));
 			core->environment.entityRotate(e_idx, glm::vec3(0.0f, 0.5f, 0.0f));
