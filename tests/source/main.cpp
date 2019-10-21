@@ -121,11 +121,12 @@ namespace Aura::Test
 	// ------------------------------------------------------------------ //
 	// Base tests.
 	// ------------------------------------------------------------------ //
-	TEST_F(CoreEnv, BuildSixtyFrameCornellBox)
+	TEST_F(CoreEnv, BuildCornellBox)
 	{
 		std::uint32_t e_idx { 0U };
 		Core::Vertex cuboid_v0 { glm::vec3(-0.5f, -0.5f, -0.5f) };
 		Core::Vertex cuboid_v1 { glm::vec3(0.5f, 0.5f, 0.5f) };
+		Core::Vertex sphere_v0 { glm::vec3(0.0f, 0.0f, 0.0f) };
 
 		// Floor
 		{
@@ -147,92 +148,88 @@ namespace Aura::Test
 			};
 			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
 			core->environment.entityScale(e_idx, glm::vec3(4.2f, 0.2f, 4.2f));
-			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, 2.0f, 0.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, 2.1f, 0.0f));
 		}
 		// Right Wall
 		{
 			Core::Material material
 			{
-				glm::vec4(0.1f, 0.5f, 0.1f, 1.0f),
+				glm::vec4(0.2f, 0.75f, 0.2f, 1.0f),
 				Core::Material::Types::Diffuse, 0.0f, 0.0f
 			};
 			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
 			core->environment.entityScale(e_idx, glm::vec3(0.2f, 4.0f, 4.0f));
-			core->environment.entityTranslate(e_idx, glm::vec3(-2.2f, 0.0f, 0.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(-2.1f, 0.0f, 0.0f));
 		}
 		// Left Wall
 		{
 			Core::Material material
 			{
-				glm::vec4(0.5f, 0.1f, 0.1f, 1.0f),
+				glm::vec4(0.75f, 0.2f, 0.2f, 1.0f),
 				Core::Material::Types::Diffuse, 0.0f, 0.0f
 			};
 			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
 			core->environment.entityScale(e_idx, glm::vec3(0.2f, 4.0f, 4.0f));
-			core->environment.entityTranslate(e_idx, glm::vec3(2.2f, 0.0f, 0.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(2.1f, 0.0f, 0.0f));
 		}
 		// End Wall
 		{
 			Core::Material material
 			{
 				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
-				Core::Material::Types::Specular, 0.0f, 0.0f
+				Core::Material::Types::Diffuse, 0.0f, 0.0f
 			};
 			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
 			core->environment.entityScale(e_idx, glm::vec3(4.2f, 4.2f, 0.2f));
 			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, 0.0f, -2.0f));
+		}
+		// Lamp
+		{
+			Core::Material material
+			{
+				glm::vec4(0.75f, 0.75f, 0.75f, 10.0f),
+				Core::Material::Types::Emissive, 0.0f, 0.0f
+			};
+			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(0.5f, 0.025f, 0.5f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, 1.95f, 0.0f));
+		}
+		// Lamp
+		{
+			Core::Material material
+			{
+				glm::vec4(0.75f, 0.75f, 0.75f, 0.0f),
+				Core::Material::Types::Specular, 0.0f, 0.0f
+			};
+			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(0.75f, 0.05f, 0.75f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, 1.95f, 0.0f));
 		}
 		// Big Sphere
 		{
 			Core::Material material
 			{
 				glm::vec4(0.5f, 0.5f, 0.5f, 1.0f),
-				Core::Material::Types::Diffuse,
-				0.0f, 0.0f
-			};
-			ASSERT_TRUE(addSphere(cuboid_v0, 0.75f, material, e_idx));
-			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
-			core->environment.entityTranslate(e_idx, glm::vec3(-0.2f, -0.5f, 1.0f));
-		}
-		// Specullar Sphere
-		{
-			Core::Material material
-			{
-				glm::vec4(0.8f, 0.8f, 0.8f, 0.4f),
 				Core::Material::Types::Specular,
-				1.3f, 0.05f
+				0.0f, 0.15f
 			};
-			ASSERT_TRUE(addSphere(cuboid_v0, 0.4f, material, e_idx));
+			ASSERT_TRUE(addSphere(sphere_v0, 0.75f, material, e_idx));
 			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
-			core->environment.entityTranslate(e_idx, glm::vec3(1.3f, 1.1f, 1.7f));
+			core->environment.entityTranslate(e_idx, glm::vec3(-1.0f, -1.25f, -1.0f));
 		}
-		// Small Sphere
-		{
-			Core::Material material
-			{
-				glm::vec4(0.7f, 0.7f, 0.3f, 1.0f),
-				Core::Material::Types::Diffuse,
-				0.0f, 0.0f
-			};
-			ASSERT_TRUE(addSphere(cuboid_v0, 0.2f, material, e_idx));
-			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
-			core->environment.entityTranslate(e_idx, glm::vec3(1.3f, 1.1f, 1.7f));
-		}
-		/*
 		// Cube
 		{
 			Core::Material material
 			{
-				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
-				Core::Material::Types::Diffuse,
-				0.0f, 0.0f
+				glm::vec4(0.5f, 0.75f, 0.75f, 0.3f),
+				Core::Material::Types::Specular,
+				1.3f, 0.0f
 			};
 			ASSERT_TRUE(addModel("models/cube.obj", material, e_idx));
 			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
-			core->environment.entityTranslate(e_idx, glm::vec3(0.5f, -1.0f, 0.5f));
-			core->environment.entityRotate(e_idx, glm::vec3(0.0f, 0.5f, 0.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(1.0f, -1.5f, -0.75f));
+			core->environment.entityRotate(e_idx, glm::vec3(0.0f, 0.6f, 0.0f));
 		}
-		*/
 	}
 	TEST_F(CoreEnv, PrimarySixtyFrameLoop)
 	{
@@ -240,10 +237,10 @@ namespace Aura::Test
 			std::shared_lock<std::shared_mutex> scene_lock(core->environment.guard);
 			{
 				std::unique_lock<std::mutex> camera_lock(core->environment.scene->camera.guard);
-				core->environment.scene->camera.data.look_from = glm::vec3(0.0f, 0.0f, 5.0f);
-				core->environment.scene->camera.data.look_at = glm::vec3(0.0f, 0.0f, 0.0f);
+				core->environment.scene->camera.data.look_from = glm::vec3(0.0f, 0.0f, 4.75f);
+				core->environment.scene->camera.data.look_at = glm::vec3(0.0f, 0.0f, -0.825f);
 				core->environment.scene->camera.data.v_up = glm::vec3(0.0f, 1.0f, 0.0f);
-				core->environment.scene->camera.data.aperture = 0.1f;
+				core->environment.scene->camera.data.aperture = 0.25f;
 				core->environment.scene->camera.data.focus = glm::length(
 					core->environment.scene->camera.data.look_from -
 					core->environment.scene->camera.data.look_at
@@ -251,19 +248,18 @@ namespace Aura::Test
 				core->environment.scene->camera.updated = true;
 			}
 		}
-		core->run(60U);
+		core->run(1U, "first-60.txt");
 		ASSERT_TRUE(core->frame_counter >= 60U);
 	}
 	
 	TEST_F(CoreEnv, SecondarySixtyFrameLoop)
 	{
-		core->run(60U);
+		core->run(60U, "second-60.txt");
 	}
 	TEST_F(CoreEnv, InfLoop)
 	{
 		core->run();
 	}
-	
 }
 
 /// <summary>

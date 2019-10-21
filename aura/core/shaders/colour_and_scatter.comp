@@ -82,21 +82,6 @@ layout(push_constant) uniform Random {
 #define EMISSIVE   4
 // Minimum distance from origin:	0.123456789012345
 #define MIN_DIST					0.0000001
-// Input: It uses texture coords as the random number seed.
-// Output: Random number: [0,1), that is between 0.0 and 0.999999... inclusive.
-// Author: Michael Pohoreski
-// Copyright: Copyleft 2012 :-)
-// NOTE: This has been upgraded to version 3 !!
-float random( vec2 p )
-{
-	// We need irrationals for pseudo randomness.
-	// Most (all?) known transcendental numbers will (generally) work.
-	const vec2 r = vec2(
-		23.1406926327792690,	// e^pi (Gelfond's constant)
-		2.6651441426902251		// 2^sqrt(2) (Gelfond–Schneider constant)
-	);
-	return fract( cos( mod( 123456789., 1e-7 + 256. * dot(p,r) ) ) );  
-}
 // Test albedo.
 vec3 test_albedo(in const vec3 n)
 {
@@ -118,7 +103,7 @@ vec3 background_albedo(in const vec3 d)
 // Diffuse reflection. Random directions above surface.
 vec3 diffuse_reflection(in const vec3 n)
 {
-	vec3 nd = n + rnd_point;
+	vec3 nd = n + rnd_point * 0.7;
 	if (nd == vec3(0.0))
 	{ return n; }
 	else
@@ -140,23 +125,29 @@ float schlick (in float cosine, in float r_idx)
 bool refraction(in const vec3 n, in const vec3 d, in const float r_idx,
 	in const bool inside, out vec3 nd)
 {
-	float cosine; float prob;
+	// float cosine; float prob;
 
 	if(inside)
 	{
-		cosine = r_idx * dot(d, n);
+		// cosine = r_idx * dot(d, -n);
 		nd = refract(d, n, r_idx);
 	}
 	else
 	{
-		cosine = -dot(d, n);
+		// cosine = -dot(d, n);
 		nd = refract(d, n, 1.0 / r_idx);
 	}
+	/*
 	if(nd == vec3(0.0))
 	{ prob = 1.0; }
 	else
 	{ prob = schlick(cosine, r_idx); }
 	if (rnd_seed < prob)
+	{ return false; }
+	else
+	{ return true; }
+	*/
+	if(nd == vec3(0.0))
 	{ return false; }
 	else
 	{ return true; }

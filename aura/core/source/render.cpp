@@ -298,7 +298,7 @@ namespace Aura::Core
 		return rand;
 	}
 	/// <summary>
-	/// Fills structure with sets of random vectors within a circle.
+	/// Fills structure with a set of a random point and seed.
 	/// </summary>
 	void Render::fillRandomsWithinCircle(RandomPointInCircleAndSeed & randoms) const
 	{

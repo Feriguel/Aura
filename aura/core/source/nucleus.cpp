@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -98,8 +99,17 @@ namespace Aura::Core
 	/// Can be used in a separate thread to permit mid run environment
 	/// transformations.
 	/// </summary>
-	void Nucleus::run(std::uint32_t const max_frames)
+	void Nucleus::run(std::uint32_t const max_frames, std::string output_file_name)
 	{
+		if constexpr (DebugSettings::frame_time && DebugSettings::time_to_file)
+		{
+			output_file.open(output_file_name);
+			if(!output_file.is_open())
+			{
+				std::cout << "Could not open output file: " << output_file_name << std::endl;
+				return;
+			}
+		}
 		if(ui.shouldWindowClose())
 		{
 			ui.setWindowCloseFlag(false);
@@ -134,6 +144,10 @@ namespace Aura::Core
 		}
 		if(isRendering())
 		{ render_task.wait(); }
+		if constexpr(DebugSettings::frame_time && DebugSettings::time_to_file)
+		{
+			output_file.close();
+		}
 	}
 	/// <summary>
 	/// Resets the frame counter and updates the limit.
@@ -209,7 +223,14 @@ namespace Aura::Core
 		start = std::chrono::system_clock::now();
 		renderFrame();
 		end = std::chrono::system_clock::now();
-		std::cout << std::chrono::duration<double, std::milli>(end - start).count() << std::endl;
+		if constexpr(DebugSettings::time_to_file)
+		{
+			output_file << std::chrono::duration<double, std::milli>(end - start).count() << std::endl;
+		}
+		else
+		{
+			std::cout << std::chrono::duration<double, std::milli>(end - start).count() << std::endl;
+		}
 	}
 
 	// ------------------------------------------------------------------ //

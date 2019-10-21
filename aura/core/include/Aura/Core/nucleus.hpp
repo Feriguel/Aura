@@ -17,6 +17,7 @@
 // Standard includes.
 #include <condition_variable>
 #include <cstdint>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -56,6 +57,8 @@ namespace Aura::Core
 		bool rendering;
 		// Rendering event flag guard.
 		std::mutex rendering_guard;
+		// Frame-time output file.
+		std::ofstream output_file;
 
 		// All main modules can access the all nucleus parts.
 		friend class UI;
@@ -95,7 +98,7 @@ namespace Aura::Core
 		/// transformations.
 		/// Returns the frame counter value at stop condition.
 		/// </summary>
-		void run(std::uint32_t const max_frames = 0U);
+		void run(std::uint32_t const max_frames = 0U, std::string output_file_name = "frame_time.txt");
 		private:
 		/// <summary>
 		/// Resets the frame counter and updates the limit.

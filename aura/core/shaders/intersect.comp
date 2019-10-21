@@ -147,20 +147,13 @@ bool cuboid(
 	if(t > t_max) { return false; }
 	// Calculate point and normal.
 	if(t_only) { return true; }
-	if(t == tv0.x)
-	{ e0 = v0 - vec3(v0.x, v1.y, v0.z); e1 = vec3(v0.xy, v1.z) - v0; }
-	else if(t == tv0.y)
-	{ e0 = v0 - vec3(v0.xy, v1.z); e1 = vec3(v0.x, v1.yz) - v0; }
-	else if(t == tv0.z)
-	{ e0 = v0 - vec3(v1.x, v0.yz); e1 = vec3(v0.x, v1.y, v0.z) - v0; }
-	else if(t == tv1.x)
-	{ e0 = v1 - vec3(v1.xy, v0.z); e1 = vec3(v1.x, v0.y, v1.z) - v1; }
-	else if(t == tv1.y)
-	{ e0 = v1 - vec3(v0.x, v1.yz); e1 = vec3(v1.xy, v0.z) - v1; }
-	else
-	{ e0 = v1 - vec3(v1.x, v0.y, v1.z); e1 = vec3(v0.x, v1.yz) - v1; }
+	if(t == tv0.x) { n = vec3(-1.0, 0.0, 0.0); }
+	else if(t == tv0.y) { n = vec3(0.0, -1.0, 0.0); }
+	else if(t == tv0.z) { n = vec3(0.0, 0.0, -1.0); }
+	else if(t == tv1.x) { n = vec3(1.0, 0.0, 0.0); }
+	else if(t == tv1.y) { n = vec3(0.0, 1.0, 0.0); }
+	else { n = vec3(0.0, 0.0, 1.0); }
 	p = o + t * d;
-	n = inner ? -cross(e0, e1) : cross(e0, e1);
 	inside = uint(inner);
 	return true;
 }
@@ -199,7 +192,7 @@ bool triangle(
 	if(t_only) { return true; }
 	bool inner = det < 0.0;
 	p = o + t * d;
-	n = inner ? cross(e2, e1) : cross(e1, e2);
+	n = inner ? -cross(e1, e2) : cross(e1, e2);
 	inside = uint(inner);
 	return true;
 }

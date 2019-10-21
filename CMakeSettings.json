@@ -4,7 +4,7 @@
 			"buildCommandArgs": "-v",
 			"buildRoot": "${projectDir}/__cmake_build__/${name}/${configurationType}",
 			"cmakeCommandArgs": "",
-			"configurationType": "Debug",
+			"configurationType": "Release",
 			"ctestCommandArgs": "",
 			"generator": "Ninja",
 			"inheritEnvironments": [ "msvc_x64_x64" ],

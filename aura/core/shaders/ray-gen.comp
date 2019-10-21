@@ -76,9 +76,10 @@ void main()
 	const float s = float(gl_GlobalInvocationID.s) / width;
 	const float t = float(gl_GlobalInvocationID.t) / height;
 	// Randomize origin within the lens and set albedo.
-	const vec3 o = origin
-		+ u * lens_radius * random(vec2(s + r.s, t + r.t))
-		+ v * lens_radius * random(vec2(t + r.t, s + r.s));
+	// const vec3 o = origin
+	// 	+ u * lens_radius * ((random(vec2(s,t)) - 0.5) + r.s * 0.5)
+	// 	+ v * lens_radius * ((random(vec2(t,s)) - 0.5) + r.t * 0.5);
+	const vec3 o = origin + u * lens_radius * r.s + v * lens_radius * r.t;
 	rays[idx].origin = o;
 	rays[idx].albedo = vec3(1.0, 1.0, 1.0);
 	// Calculate direction and length.
