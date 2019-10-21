@@ -132,12 +132,93 @@ namespace Aura::Test
 			Core::Material material
 			{
 				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
+				Core::Material::Types::Diffuse, 0.0f, 0.0f
+			};
+			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(4.2f, 0.2f, 4.2f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, -2.1f, 0.0f));
+		}
+		// Roof
+		{
+			Core::Material material
+			{
+				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
+				Core::Material::Types::Diffuse, 0.0f, 0.0f
+			};
+			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(4.2f, 0.2f, 4.2f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, 2.0f, 0.0f));
+		}
+		// Right Wall
+		{
+			Core::Material material
+			{
+				glm::vec4(0.1f, 0.5f, 0.1f, 1.0f),
+				Core::Material::Types::Diffuse, 0.0f, 0.0f
+			};
+			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(0.2f, 4.0f, 4.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(-2.2f, 0.0f, 0.0f));
+		}
+		// Left Wall
+		{
+			Core::Material material
+			{
+				glm::vec4(0.5f, 0.1f, 0.1f, 1.0f),
+				Core::Material::Types::Diffuse, 0.0f, 0.0f
+			};
+			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(0.2f, 4.0f, 4.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(2.2f, 0.0f, 0.0f));
+		}
+		// End Wall
+		{
+			Core::Material material
+			{
+				glm::vec4(0.75f, 0.75f, 0.75f, 1.0f),
 				Core::Material::Types::Specular, 0.0f, 0.0f
 			};
 			ASSERT_TRUE(addCuboid(cuboid_v0, cuboid_v1, material, e_idx));
-			core->environment.entityScale(e_idx, glm::vec3(4.0f, 0.2f, 4.0f));
-			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, -2.1f, 0.0f));
+			core->environment.entityScale(e_idx, glm::vec3(4.2f, 4.2f, 0.2f));
+			core->environment.entityTranslate(e_idx, glm::vec3(0.0f, 0.0f, -2.0f));
 		}
+		// Big Sphere
+		{
+			Core::Material material
+			{
+				glm::vec4(0.5f, 0.5f, 0.5f, 1.0f),
+				Core::Material::Types::Diffuse,
+				0.0f, 0.0f
+			};
+			ASSERT_TRUE(addSphere(cuboid_v0, 0.75f, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(-0.2f, -0.5f, 1.0f));
+		}
+		// Specullar Sphere
+		{
+			Core::Material material
+			{
+				glm::vec4(0.8f, 0.8f, 0.8f, 0.4f),
+				Core::Material::Types::Specular,
+				1.3f, 0.05f
+			};
+			ASSERT_TRUE(addSphere(cuboid_v0, 0.4f, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(1.3f, 1.1f, 1.7f));
+		}
+		// Small Sphere
+		{
+			Core::Material material
+			{
+				glm::vec4(0.7f, 0.7f, 0.3f, 1.0f),
+				Core::Material::Types::Diffuse,
+				0.0f, 0.0f
+			};
+			ASSERT_TRUE(addSphere(cuboid_v0, 0.2f, material, e_idx));
+			core->environment.entityScale(e_idx, glm::vec3(1.0f, 1.0f, 1.0f));
+			core->environment.entityTranslate(e_idx, glm::vec3(1.3f, 1.1f, 1.7f));
+		}
+		/*
 		// Cube
 		{
 			Core::Material material
@@ -151,6 +232,7 @@ namespace Aura::Test
 			core->environment.entityTranslate(e_idx, glm::vec3(0.5f, -1.0f, 0.5f));
 			core->environment.entityRotate(e_idx, glm::vec3(0.0f, 0.5f, 0.0f));
 		}
+		*/
 	}
 	TEST_F(CoreEnv, PrimarySixtyFrameLoop)
 	{
@@ -172,6 +254,7 @@ namespace Aura::Test
 		core->run(60U);
 		ASSERT_TRUE(core->frame_counter >= 60U);
 	}
+	
 	TEST_F(CoreEnv, SecondarySixtyFrameLoop)
 	{
 		core->run(60U);
@@ -180,6 +263,7 @@ namespace Aura::Test
 	{
 		core->run();
 	}
+	
 }
 
 /// <summary>
