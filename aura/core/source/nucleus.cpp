@@ -21,6 +21,7 @@
 #include <limits>
 #include <mutex>
 #include <string>
+#include <sstream>
 #include <thread>
 #include <vector>
 // External includes.
@@ -37,8 +38,8 @@ namespace Aura::Core
 		std::string const & app_name, std::uint16_t const & app_major,
 		std::uint16_t const & app_minor, std::uint16_t const & app_patch
 	) :
-		ThreadPool(1U),
-		//ThreadPool(std::thread::hardware_concurrency()),
+		//ThreadPool(1U),
+		ThreadPool(std::thread::hardware_concurrency()),
 		app_info({ app_name, app_major, app_minor, app_patch }),
 		ui(*this), environment(*this), render(*this),
 		frame_counter(0U), frame_limit(0U), rendering(false)
@@ -103,6 +104,15 @@ namespace Aura::Core
 	{
 		if constexpr (DebugSettings::frame_time && DebugSettings::time_to_file)
 		{
+			auto const extension_pos = output_file_name.find_last_of('.');
+			std::stringstream test_type {};
+			test_type << '-' << max_frames << '-' << n_threads << '-' << display_settings.anti_aliasing
+				<< '-' << display_settings.ray_depth << '-';
+			if constexpr(DebugSettings::split_memory)
+			{ test_type << "split"; }
+			else
+			{ test_type << "non-split"; }
+			output_file_name.insert(extension_pos, test_type.str().c_str());
 			output_file.open(output_file_name);
 			if(!output_file.is_open())
 			{

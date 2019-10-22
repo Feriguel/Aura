@@ -248,18 +248,20 @@ namespace Aura::Test
 				core->environment.scene->camera.updated = true;
 			}
 		}
-		core->run(1U, "first-60.txt");
-		ASSERT_TRUE(core->frame_counter >= 60U);
+		core->run(10U, "../results.txt");
+		ASSERT_TRUE(core->frame_counter >= 10U);
 	}
-	
 	TEST_F(CoreEnv, SecondarySixtyFrameLoop)
 	{
-		core->run(60U, "second-60.txt");
+		core->run(60U, "../results.txt");
+		ASSERT_TRUE(core->frame_counter >= 60U);
 	}
+	/*
 	TEST_F(CoreEnv, InfLoop)
 	{
 		core->run();
 	}
+	*/
 }
 
 /// <summary>

@@ -76,7 +76,7 @@ namespace Aura
 			// Outputs the time to a file.
 			static constexpr bool time_to_file { true };
 			// When on it splits all buffers memories to separate structures.
-			static constexpr bool split_memory { false };
+			static constexpr bool split_memory { true };
 		};
 
 		/// <summary>
